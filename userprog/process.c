@@ -792,26 +792,28 @@ static bool install_page(void *upage, void *kpage, bool writable) {
  * If you want to implement the function for only project 2, implement it on
  * the upper block. */
 
+// lazy_load 알고리즘 공부 후  작성
 static bool lazy_load_segment(struct page *page, void *aux) {
-  /* TODO: Load the segment from the file */
-  /* TODO: This called when the first page fault occurs on address VA. */
-  /* TODO: VA is available when calling this function. */
+  /* TODO: Load the segment from the file - 파일에서 세그먼트를 로드합니다 */
+  /* TODO: This called when the first page fault occurs on address VA. - 주소 VA에서 첫 페이지 오류가 발생하면 호출됩니다. */
+  /* TODO: VA is available when calling this function. - VA는 이 기능을 호출할 때 사용 가능합니다. */
 }
 
-/* Loads a segment starting at offset OFS in FILE at address
- * UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
- * memory are initialized, as follows:
+/* Loads a segment starting at offset OFS in FILE at address UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual memory are initialized, as follows:
+ * 오프셋 OFS에서 시작하는 세그먼트를 주소 UPAGE의 FILE에 로드합니다. 
+ * 총 가상 메모리의 READ_BYTES + ZERO_BYTES 바이트는 다음과 같이 초기화됩니다
  *
- * - READ_BYTES bytes at UPAGE must be read from FILE
- * starting at offset OFS.
+ * - READ_BYTES bytes at UPAGE must be read from FILE starting at offset OFS.
+ * UPAGE에서 READ_BYTEs 바이트는 오프셋 OFS에서 시작하는 FILE에서 읽어야 합니다.
  *
  * - ZERO_BYTES bytes at UPAGE + READ_BYTES must be zeroed.
+ * - UPAGE + READ_BYTES에서 ZERO_BYTES 바이트를 0으로 설정해야 합니다.
  *
- * The pages initialized by this function must be writable by the
- * user process if WRITABLE is true, read-only otherwise.
+ * The pages initialized by this function must be writable by the user process if WRITABLE is true, read-only otherwise.
+ * WRITABLE이 true이면 이 함수로 초기화된 페이지는 사용자 프로세스에서 쓰기 가능해야 하고 그렇지 않으면 읽기 전용이어야 합니다.
  *
- * Return true if successful, false if a memory allocation error
- * or disk read error occurs. */
+ * Return true if successful, false if a memory allocation error or disk read error occurs. 
+ * 성공하면 true를 반환하고, 메모리 할당 오류 또는 디스크 읽기 오류가 발생하면 false를 반환합니다. */
 static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
                          uint32_t read_bytes, uint32_t zero_bytes,
                          bool writable) {
@@ -820,13 +822,14 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
   ASSERT(ofs % PGSIZE == 0);
 
   while (read_bytes > 0 || zero_bytes > 0) {
-    /* Do calculate how to fill this page.
-     * We will read PAGE_READ_BYTES bytes from FILE
-     * and zero the final PAGE_ZERO_BYTES bytes. */
+    /* Do calculate how to fill this page. We will read PAGE_READ_BYTES bytes from FILE and zero the final PAGE_ZERO_BYTES bytes. 
+     * 이 페이지를 채울 방법을 계산합니다. 
+     * FILE에서 PAGE_READ_BYTES 바이트를 읽고 최종 PAGE_ZERO_BYTES 바이트를 0으로 만듭니다. */
     size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
     size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
     /* TODO: Set up aux to pass information to the lazy_load_segment. */
+    /* aux가 lazy_load_segment에 정보를 전달하도록 설정합니다. */
     void *aux = NULL;
     if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable,
                                         lazy_load_segment, aux))
@@ -841,6 +844,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 }
 
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
+/* USER_STACK에서 스택의 PAGE를 작성합니다. 성공 시 true를 반환합니다. */
 static bool setup_stack(struct intr_frame *if_) {
   bool success = false;
   void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
@@ -849,6 +853,21 @@ static bool setup_stack(struct intr_frame *if_) {
    * TODO: If success, set the rsp accordingly.
    * TODO: You should mark the page is stack. */
   /* TODO: Your code goes here */
+
+  /* TODO: stack_bottom에 스택을 매핑하고 페이지를 즉시 청구합니다.
+   * TODO: 성공한 경우 rsp를 그에 맞게 설정합니다.
+   * TODO: 페이지에 스택 표시를 해주셔야 합니다. */
+
+  // 1. Map the stack on stack_bottom and claim the page immediately.
+   if (map_and_claim_stack(stack_bottom)) {
+        success = true;
+
+        // 2. Set the rsp accordingly.
+        if_->rsp = (uintptr_t)stack_bottom;
+
+        // 3. Mark the page as a stack page.
+        mark_as_stack_page(stack_bottom);
+    }
 
   return success;
 }
