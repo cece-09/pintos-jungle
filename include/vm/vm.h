@@ -1,5 +1,7 @@
 #ifndef VM_VM_H
 #define VM_VM_H
+
+#include <hash.h>
 #include <stdbool.h>
 #include "threads/palloc.h"
 
@@ -46,6 +48,8 @@ struct page {
 	struct frame *frame;   /* Back reference for frame */
 
 	/* Your implementation */
+	/* SPT - for hash table */
+	struct hash_elem elem;
 
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
@@ -61,7 +65,7 @@ struct page {
 
 /* The representation of "frame" */
 struct frame {
-	void *kva;
+	void *kva; /* kernel virtual address */
 	struct page *page;
 };
 
@@ -85,6 +89,8 @@ struct page_operations {
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table {
+	/* SPT - Use hash table. */
+	struct hash hash;
 };
 
 #include "threads/thread.h"
