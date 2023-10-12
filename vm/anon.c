@@ -43,7 +43,10 @@ static bool anon_swap_in(struct page *page, void *kva) {
   struct thread *t = thread_current();
   bool succ = false;
 
-  if (!t->pml4) return false;
+  if (!t->pml4) {
+    printf("no pml4\n");
+    return false;
+  }
 
   struct anon_page *anon_page = &page->anon;
   enum vm_type type = page_get_type(page);
@@ -54,6 +57,8 @@ static bool anon_swap_in(struct page *page, void *kva) {
     printf("evict the page?\n");
   } else {
     succ = pml4_set_page(t->pml4, va, kva, writable);
+    printf("💛 va: %p, kva: %p, writable: %d, succ: %d\n", va, kva, writable,
+           succ);
   }
 
   return succ;

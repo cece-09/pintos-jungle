@@ -174,10 +174,12 @@ struct thread {
   uint64_t exit_code; /* Return value of child */
 
   struct intr_frame fork_tf; /* Context to fork  */
-// #endif
-#ifdef VM
+
   /* Table for whole virtual memory owned by thread. */
   struct supplemental_page_table spt;
+// #endif
+#ifdef VM
+
 #endif
 
   /* Owned by thread.c. */

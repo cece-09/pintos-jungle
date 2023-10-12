@@ -92,7 +92,7 @@ intr_entry:
         3. Push the interrupt number on the stack. */
 
 /* This implements steps 1 and 2, described above, in the common
-   case where we just push a 0 error code. */
+   case where we just push a 0 error code. dummy data */
 #define zero pushq $0;
 
 /* This implements steps 1 and 2, described above, in the case

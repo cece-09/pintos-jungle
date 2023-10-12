@@ -73,6 +73,11 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
       printf("spt_insert_page: spt insert failed\n");
       goto err;
     }
+
+    /* 만약 즉시  */
+    if (upage == 0x4747f000) {
+      return vm_do_claim_page(page);
+    }
     return true;
   }
 err:
@@ -84,6 +89,8 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va) {
   struct hash_elem *spt_elem;
   struct page *page = NULL;
   struct page tmp;
+
+  /* align */
   tmp.va = pg_round_down(va);
 
   spt_elem = hash_find(&spt->hash, &tmp.elem);
@@ -157,15 +164,19 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
-  printf("💜 try to handle page fault: %p\n", addr);
+  printf("💜 Page fault at %p: %s error %s page in %s context.\n", addr,
+         not_present ? "not present" : "rights violation",
+         write ? "writing" : "reading", user ? "user" : "kernel");
+
   struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
   struct page *page = spt_find_page(spt, addr);
-  enum vm_type type;
+
   /* TODO: Validate the fault */
   /* TODO: Your code goes here */
   if (page) {
     printf("🔥 page found : %p\n", page->va);
-  }
+  } else
+    return false;
 
   return vm_do_claim_page(page);
 }
@@ -193,6 +204,8 @@ static bool vm_do_claim_page(struct page *page) {
   /* Set links */
   frame->page = page;
   page->frame = frame;
+
+  printf("🔥 map frame %p with page %p\n", frame->kva, page->va);
 
   /* Initialize page */
   page->uninit.page_initializer(page, type, frame->kva);

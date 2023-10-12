@@ -759,6 +759,49 @@ static bool install_page(void *upage, void *kpage, bool writable) {
           pml4_set_page(t->pml4, upage, kpage, writable));
 }
 
+static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
+                         uint32_t read_bytes, uint32_t zero_bytes,
+                         bool writable) {
+  ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
+  ASSERT(pg_ofs(upage) == 0);
+  ASSERT(ofs % PGSIZE == 0);
+
+  file_seek(file, ofs);
+  while (read_bytes > 0 || zero_bytes > 0) {
+    /* Do calculate how to fill this page.
+     * We will read PAGE_READ_BYTES bytes from FILE
+     * and zero the final PAGE_ZERO_BYTES bytes. */
+    size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+    size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+    /* Get a page of memory. */
+    uint8_t *kpage = palloc_get_page(PAL_USER);
+    if (kpage == NULL) return false;
+
+    /* Load this page. */
+    if (file_read(file, kpage, page_read_bytes) != (int)page_read_bytes) {
+      palloc_free_page(kpage);
+      return false;
+    }
+    printf("🔥 %p %d - %d (%d bytes)\n", file, read_bytes,
+           read_bytes + page_read_bytes, page_read_bytes);
+    memset(kpage + page_read_bytes, 0, page_zero_bytes);
+
+    /* Add the page to the process's address space. */
+    if (!install_page(upage, kpage, writable)) {
+      printf("fail\n");
+      palloc_free_page(kpage);
+      return false;
+    }
+
+    /* Advance. */
+    read_bytes -= page_read_bytes;
+    zero_bytes -= page_zero_bytes;
+    upage += PGSIZE;
+  }
+  return true;
+}
+
 #else
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on
@@ -777,8 +820,9 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   /* TODO: VA is available when calling this function. */
 
   /* Get a page of memory. */
-  struct frame *frame = page->frame->kva;
-  if (frame == NULL) {
+  struct frame *frame = page->frame;
+  void *kva = frame->kva;
+  if (frame == NULL || kva == NULL) {
     PANIC("No frame is allocated.\n");
   }
   struct file_info *file_info = (struct file_info *)aux;
@@ -788,22 +832,11 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   void *upage = page->va;
 
   /* Load this page. */
-  printf("🚨 try to read elf file!\n");
-  file_open(file->inode);
+  printf("🚨 read elf file: %p from %d to %d (%d bytes)\n", file, ofs,
+         ofs + bytes, bytes);
+  printf("💛 frame addr: %p\n", kva);
   file_seek(file, ofs);
-  file_read(file, frame, bytes);
-  //   if (!= (int)page_read_bytes) {
-  //     palloc_free_page(kpage);
-  //     return false;
-  //   }
-  //   memset(kpage + page_read_bytes, 0, page_zero_bytes);
-
-  /* Add the page to the process's address space. */
-  //   if (!install_page(upage, kpage, writable)) {
-  //     printf("fail\n");
-  //     palloc_free_page(kpage);
-  //     return false;
-  //   }
+  file_read(file, kva, bytes);
 }
 
 static bool stack_grows(struct page *page, void *aux) {
@@ -833,6 +866,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
   ASSERT(pg_ofs(upage) == 0);
   ASSERT(ofs % PGSIZE == 0);
 
+  file_seek(file, ofs);
   while (read_bytes > 0 || zero_bytes > 0) {
     /* Do calculate how to fill this page.
      * We will read PAGE_READ_BYTES bytes from FILE
@@ -845,6 +879,9 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
     aux->file = file;
     aux->ofs = read_bytes;
     aux->bytes = page_read_bytes;
+
+    printf("💛 from %d to %d (%d bytes)\n", read_bytes,
+           read_bytes + page_read_bytes, page_read_bytes);
 
     if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable,
                                         lazy_load_segment, aux))
@@ -862,9 +899,10 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 static bool setup_stack(struct intr_frame *if_) {
   bool success = false;
   void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
-  //   success = true;
-  success = vm_alloc_page_with_initializer(
-      VM_ANON, (uint8_t *)USER_STACK - PGSIZE, true, stack_grows, NULL);
+  printf("💛 stack bottom: %p\n", stack_bottom);
+
+  success = vm_alloc_page_with_initializer(VM_ANON, stack_bottom, true,
+                                           stack_grows, NULL);
   if (success) if_->rsp = USER_STACK;
 
   /* TODO: Map the stack on stack_bottom and claim the page immediately.
