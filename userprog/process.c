@@ -12,6 +12,7 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/mmu.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
@@ -19,6 +20,8 @@
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
 #include "userprog/tss.h"
+
+#define VM
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -87,7 +90,7 @@ static void initd(void *f_name) {
   /* Create file descriptor table. */
   bool success = process_init();
   if (success == false) {
-    PANIC("Fail to launch initd\n");
+    PANIC("Fail to create file descriptor table.\n");
   }
 
   /* Initiate standard I/0 */
@@ -472,14 +475,14 @@ struct ELF64_hdr {
 };
 
 struct ELF64_PHDR {
-  uint32_t p_type;
-  uint32_t p_flags;
-  uint64_t p_offset;
-  uint64_t p_vaddr;
-  uint64_t p_paddr;
-  uint64_t p_filesz;
-  uint64_t p_memsz;
-  uint64_t p_align;
+  uint32_t p_type;   /* type of segment */
+  uint32_t p_flags;  /* flags. including permission */
+  uint64_t p_offset; /* segment offset */
+  uint64_t p_vaddr;  /* what va the first byte of segment should be? */
+  uint64_t p_paddr;  /* physical address */
+  uint64_t p_filesz; /* bytes of segment's file image */
+  uint64_t p_memsz;  /* bytes of sement's memory image */
+  uint64_t p_align;  /* alignment */
 };
 
 /* Abbreviations */
@@ -519,7 +522,10 @@ static bool load(const char *file_name, struct intr_frame *if_) {
 
   /* Allocate and activate page directory. */
   t->pml4 = pml4_create();  // 여기서 초기화됨
-  if (t->pml4 == NULL) goto done;
+  if (t->pml4 == NULL) {
+    printf("load: %s: error creating pml4\n", file_name);
+    goto done;
+  }
 
   process_activate(thread_current());
 
@@ -568,7 +574,7 @@ static bool load(const char *file_name, struct intr_frame *if_) {
       case PT_INTERP:
       case PT_SHLIB:
         goto done;
-      case PT_LOAD:
+      case PT_LOAD: /* if segment is loadable, */
         if (validate_segment(&phdr, file)) {
           bool writable = (phdr.p_flags & PF_W) != 0;
           uint64_t file_page = phdr.p_offset & ~PGMASK;
@@ -588,8 +594,10 @@ static bool load(const char *file_name, struct intr_frame *if_) {
             zero_bytes = ROUND_UP(page_offset + phdr.p_memsz, PGSIZE);
           }
           if (!load_segment(file, file_page, (void *)mem_page, read_bytes,
-                            zero_bytes, writable))
+                            zero_bytes, writable)) {
+            printf("load: %s: error loading segment\n", file_name);
             goto done;
+          }
         } else
           goto done;
         break;
@@ -597,7 +605,10 @@ static bool load(const char *file_name, struct intr_frame *if_) {
   }
 
   /* Set up stack. */
-  if (!setup_stack(if_)) goto done;
+  if (!setup_stack(if_)) {
+    printf("load: %s: error setting up stack\n", file_name);
+    goto done;
+  }
 
   /* Start address. */
   if_->rip = ehdr.e_entry;
@@ -796,6 +807,34 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   /* TODO: Load the segment from the file */
   /* TODO: This called when the first page fault occurs on address VA. */
   /* TODO: VA is available when calling this function. */
+  struct file *file = (struct file *)aux;
+  void *upage = page->va;
+
+  // 인자로, 내가 어느 파일에서 읽어야 하는지, 어디서부터 어디까지 읽어야 하는지
+  // 정보를 알아야함.
+
+  // 먼저 mem_page를 기준으로 페이지를 할당하고
+  // 지정된 파일 오프셋에서 최대 바이트만큼 읽어서
+  // 메모리에 셋 한다.
+  // 그걸 pml4에 매핑한다.
+
+  /* Get a page of memory. */
+  // uint8_t *kpage = palloc_get_page(PAL_USER);
+  // if (kpage == NULL) return false;
+
+  // /* Load this page. */
+  // if (file_read(file, kpage, page_read_bytes) != (int)page_read_bytes) {
+  //   palloc_free_page(kpage);
+  //   return false;
+  // }
+  // memset(kpage + page_read_bytes, 0, page_zero_bytes);
+
+  // /* Add the page to the process's address space. */
+  // if (!install_page(upage, kpage, writable)) {
+  //   printf("fail\n");
+  //   palloc_free_page(kpage);
+  //   return false;
+  // }
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -812,6 +851,13 @@ static bool lazy_load_segment(struct page *page, void *aux) {
  *
  * Return true if successful, false if a memory allocation error
  * or disk read error occurs. */
+
+static struct file_info {
+  struct file *file;
+  off_t ofs;
+  uint32_t bytes;
+};
+
 static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
                          uint32_t read_bytes, uint32_t zero_bytes,
                          bool writable) {
@@ -827,7 +873,11 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
     size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
     /* TODO: Set up aux to pass information to the lazy_load_segment. */
-    void *aux = NULL;
+    struct file_info *aux = malloc(sizeof(struct file_info));
+    aux->file = file;
+    aux->ofs = read_bytes;
+    aux->bytes = page_read_bytes;
+
     if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable,
                                         lazy_load_segment, aux))
       return false;
@@ -844,6 +894,10 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 static bool setup_stack(struct intr_frame *if_) {
   bool success = false;
   void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
+
+  success = vm_alloc_page_with_initializer(
+      VM_ANON, (uint8_t *)USER_STACK - PGSIZE, true, lazy_load_segment, NULL);
+  if (success) if_->rsp = USER_STACK;
 
   /* TODO: Map the stack on stack_bottom and claim the page immediately.
    * TODO: If success, set the rsp accordingly.
