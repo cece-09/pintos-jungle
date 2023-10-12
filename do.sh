@@ -61,6 +61,8 @@ BAD_READ2="pintos -v -k  -m 20   --fs-disk=10 -p tests/userprog/bad-read2:bad-re
 BAD_WRITE2="pintos -v -k  -m 20   --fs-disk=10 -p tests/userprog/bad-write2:bad-write2 --swap-disk=4 -- -q   -f run bad-write2"
 BAD_JUMP="pintos -v -k  -m 20   --fs-disk=10 -p tests/userprog/bad-jump:bad-jump --swap-disk=4 -- -q   -f run bad-jump"
 BAD_JUMP2="pintos -v -k  -m 20   --fs-disk=10 -p tests/userprog/bad-jump2:bad-jump2 --swap-disk=4 -- -q   -f run bad-jump2"
+
+# VM
 PT_GROW_STACK="pintos -v -k -m 20  --fs-disk=10 -p tests/vm/pt-grow-stack:pt-grow-stack --swap-disk=4 -- -q   -f run pt-grow-stack"
 PT_GROW_BAD="pintos -v -k  -m 20   --fs-disk=10 -p tests/vm/pt-grow-bad:pt-grow-bad --swap-disk=4 -- -q   -f run pt-grow-bad"
 PT_BIG_STK_OBJ="pintos -v -k  -m 20   --fs-disk=10 -p tests/vm/pt-big-stk-obj:pt-big-stk-obj --swap-disk=4 -- -q   -f run pt-big-stk-obj"
@@ -107,6 +109,8 @@ SWAP_FILE="pintos -v -k  -m 8   --fs-disk=10 -p tests/vm/swap-file:swap-file -p 
 SWAP_ANON="pintos -v -k  -m 10   --fs-disk=10 -p tests/vm/swap-anon:swap-anon --swap-disk=30 -- -q   -f run swap-anon"
 SWAP_ITER="pintos -v -k  -m 10   --fs-disk=10 -p tests/vm/swap-iter:swap-iter -p ../../tests/vm/large.txt:large.txt --swap-disk=50 -- -q   -f run swap-iter"
 SWAP_FORK="pintos -v -k 0 -m 40   --fs-disk=10 -p tests/vm/swap-fork:swap-fork -p tests/vm/child-swap:child-swap --swap-disk=200 -- -q   -f run swap-fork"
+###########
+
 LG_CREATE="pintos -v -k  -m 20   --fs-disk=10 -p tests/filesys/base/lg-create:lg-create --swap-disk=4 -- -q   -f run lg-create"
 LG_FULL="pintos -v -k  -m 20   --fs-disk=10 -p tests/filesys/base/lg-full:lg-full --swap-disk=4 -- -q   -f run lg-full"
 LG_RANDOM="pintos -v -k  -m 20   --fs-disk=10 -p tests/filesys/base/lg-random:lg-random --swap-disk=4 -- -q   -f run lg-random"
@@ -147,4 +151,4 @@ make
 cd build
 source ../../activate
 
-$ARGS_NONE
+$PT_GROW_STACK

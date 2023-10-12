@@ -783,8 +783,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
       palloc_free_page(kpage);
       return false;
     }
-    printf("🔥 %p %d - %d (%d bytes)\n", file, read_bytes,
-           read_bytes + page_read_bytes, page_read_bytes);
+
     memset(kpage + page_read_bytes, 0, page_zero_bytes);
 
     /* Add the page to the process's address space. */
@@ -834,9 +833,6 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   void *upage = page->va;
 
   /* Load this page. */
-  printf("🚨 read elf file: %p from %d to %d (%d bytes)\n", file, ofs,
-         ofs + bytes, bytes);
-  printf("💛 page addr: %p, frame addr: %p\n", page->va, kva);
 
   file_seek(file, ofs);
 
@@ -848,14 +844,13 @@ static bool lazy_load_segment(struct page *page, void *aux) {
     printf("evict the page?\n");
   } else {
     succ = pml4_set_page(curr->pml4, page->va, kva, true);
-    printf("💛 succ: %d\n", succ);
   }
 
   return succ;
 }
 
 static bool stack_grows(struct page *page, void *aux) {
-  printf("💛 stack grows.\n");
+  
   return true;
 }
 
@@ -895,9 +890,6 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
     aux->file = file;
     aux->ofs = start;
     aux->bytes = page_read_bytes;
-
-    printf("💛 from %d to %d (%d bytes)\n", read_bytes,
-           read_bytes + page_read_bytes, page_read_bytes);
 
     if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable,
                                         lazy_load_segment, aux))

@@ -55,6 +55,8 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 
   struct supplemental_page_table *spt = &thread_current()->spt;
   struct page *page = malloc(sizeof(struct page));
+
+  /* page가 할당되고 난 후 설정되어야 하는 쓰기 권한? */
   page->writable = writable;
 
   /* Check wheter the upage is already occupied or not. */
@@ -74,10 +76,10 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
       goto err;
     }
 
-    /* If stack, */
-    if (upage == 0x4747f000) {
-      return vm_do_claim_page(page);
-    }
+    // /* If stack, */
+    // if (upage == 0x4747f000) {
+    //   return vm_do_claim_page(page);
+    // }
     return true;
   }
 err:
@@ -99,7 +101,6 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va) {
   }
 
   page = hash_entry(spt_elem, struct page, elem);
-  printf("🔥 find va: %p\n", page->va);
 
   return page;
 }
@@ -110,7 +111,7 @@ bool spt_insert_page(struct supplemental_page_table *spt, struct page *page) {
 
   /* Function hash_insert returns old hash elem. */
   hash_insert(&spt->hash, &page->elem);
-  printf("🩷 insert page va: %p\n", page->va);
+
   succ = true;
   return succ;
 }
@@ -169,9 +170,6 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
-  printf("💜 Page fault at %p: %s error %s page in %s context.\n", addr,
-         not_present ? "not present" : "rights violation",
-         write ? "writing" : "reading", user ? "user" : "kernel");
 
   struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
   struct page *page = spt_find_page(spt, addr);
@@ -181,12 +179,6 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   if (page == NULL) {
     return false;
   }
-
-//   if(page->writable == false) {
-//     return false;
-//   }
-
-  printf("🔥 page found : %p\n", page->va);
   return vm_do_claim_page(page);
 }
 
@@ -213,8 +205,6 @@ static bool vm_do_claim_page(struct page *page) {
   /* Set links */
   frame->page = page;
   page->frame = frame;
-
-  printf("🔥 map frame %p with page %p\n", frame->kva, page->va);
 
   /* Initialize page */
   return swap_in(page, frame->kva);
