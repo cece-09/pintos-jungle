@@ -11,7 +11,7 @@
 #include "threads/thread.h"
 
 static uint64_t *pgdir_walk(uint64_t *pdp, const uint64_t va, int create) {
-  int idx = PDX(va);
+  int idx = PDX(va); /* page directory offset */
   if (pdp) {
     uint64_t *pte = (uint64_t *)pdp[idx];
     if (!((uint64_t)pte & PTE_P)) {
@@ -31,7 +31,7 @@ static uint64_t *pgdir_walk(uint64_t *pdp, const uint64_t va, int create) {
 
 static uint64_t *pdpe_walk(uint64_t *pdpe, const uint64_t va, int create) {
   uint64_t *pte = NULL;
-  int idx = PDPE(va);
+  int idx = PDPE(va); /* get pdp offset */
   int allocated = 0;
   if (pdpe) {
     uint64_t *pde = (uint64_t *)pdpe[idx];
@@ -63,7 +63,7 @@ static uint64_t *pdpe_walk(uint64_t *pdpe, const uint64_t va, int create) {
  * pointer is returned. */
 uint64_t *pml4e_walk(uint64_t *pml4e, const uint64_t va, int create) {
   uint64_t *pte = NULL;
-  int idx = PML4(va);
+  int idx = PML4(va); /* get pml4 offset */
   int allocated = 0;
   if (pml4e) {
     uint64_t *pdpe = (uint64_t *)pml4e[idx];

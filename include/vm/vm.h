@@ -51,6 +51,7 @@ struct page {
   /* Your implementation */
   /* SPT - for hash table */
   struct hash_elem elem;
+  bool writable;
 
   /* Per-type data are binded into the union.
    * Each function automatically detects the current union */

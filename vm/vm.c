@@ -55,6 +55,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 
   struct supplemental_page_table *spt = &thread_current()->spt;
   struct page *page = malloc(sizeof(struct page));
+  page->writable = writable;
 
   /* Check wheter the upage is already occupied or not. */
   if (spt_find_page(spt, upage) == NULL) {
@@ -91,7 +92,7 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va) {
   }
 
   page = hash_entry(spt_elem, struct page, elem);
-  printf("🔥 find va: %p, %p\n", page->va, vtop(page->va));
+  printf("🔥 find va: %p\n", page->va);
 
   return page;
 }
@@ -133,11 +134,14 @@ static struct frame *vm_evict_frame(void) {
 /* palloc() and get frame. If there is no available page, evict the page
  * and return it. This always return valid address. That is, if the user pool
  * memory is full, this function evicts the frame to get the available memory
- * space.*/
+ * space. */
 static struct frame *vm_get_frame(void) {
   struct frame *frame = NULL;
-  frame = malloc(sizeof(struct frame));
+  frame = calloc(1, sizeof(struct frame));
   frame->kva = palloc_get_page(PAL_USER | PAL_ZERO | PAL_ASSERT);
+  if (frame->kva == NULL) {
+    printf("Memory is full.\n");
+  }
 
   ASSERT(frame != NULL);
   ASSERT(frame->page == NULL);
@@ -150,17 +154,17 @@ static void vm_stack_growth(void *addr UNUSED) {}
 /* Handle the fault on write_protected page */
 static bool vm_handle_wp(struct page *page UNUSED) {}
 
-/* Return true on success */
+/* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
   printf("💜 try to handle page fault: %p\n", addr);
   struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
   struct page *page = spt_find_page(spt, addr);
+  enum vm_type type;
   /* TODO: Validate the fault */
   /* TODO: Your code goes here */
   if (page) {
     printf("🔥 page found : %p\n", page->va);
-    // page->uninit.page_initializer(page);
   }
 
   return vm_do_claim_page(page);
@@ -184,12 +188,14 @@ bool vm_claim_page(void *va UNUSED) {
 /* Claim the PAGE and set up the mmu. */
 static bool vm_do_claim_page(struct page *page) {
   struct frame *frame = vm_get_frame();
+  enum vm_type type = page_get_type(page);
 
   /* Set links */
   frame->page = page;
   page->frame = frame;
 
-  /* TODO: Insert page table entry to map page's VA to frame's PA. */
+  /* Initialize page */
+  page->uninit.page_initializer(page, type, frame->kva);
   return swap_in(page, frame->kva);
 }
 
