@@ -74,7 +74,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
       goto err;
     }
 
-    /* 만약 즉시  */
+    /* If stack, */
     if (upage == 0x4747f000) {
       return vm_do_claim_page(page);
     }
@@ -145,6 +145,11 @@ static struct frame *vm_evict_frame(void) {
 static struct frame *vm_get_frame(void) {
   struct frame *frame = NULL;
   frame = calloc(1, sizeof(struct frame));
+  if (frame == NULL) {
+    printf("Frame allocation failed.\n");
+    return NULL;
+  }
+
   frame->kva = palloc_get_page(PAL_USER | PAL_ZERO | PAL_ASSERT);
   if (frame->kva == NULL) {
     printf("Memory is full.\n");
@@ -173,11 +178,15 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
 
   /* TODO: Validate the fault */
   /* TODO: Your code goes here */
-  if (page) {
-    printf("🔥 page found : %p\n", page->va);
-  } else
+  if (page == NULL) {
     return false;
+  }
 
+//   if(page->writable == false) {
+//     return false;
+//   }
+
+  printf("🔥 page found : %p\n", page->va);
   return vm_do_claim_page(page);
 }
 
@@ -208,7 +217,6 @@ static bool vm_do_claim_page(struct page *page) {
   printf("🔥 map frame %p with page %p\n", frame->kva, page->va);
 
   /* Initialize page */
-  page->uninit.page_initializer(page, type, frame->kva);
   return swap_in(page, frame->kva);
 }
 

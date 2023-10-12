@@ -30,38 +30,15 @@ bool anon_initializer(struct page *page, enum vm_type type, void *kva) {
   /* Set up the handler */
   page->operations = &anon_ops;
 
-  /*  */
   struct anon_page *anon_page = &page->anon;
-
-  /* run initialize function. */
-  page->uninit.init(page, page->uninit.aux);
+  printf("anon\n");
+  return true;
 }
 
 /* Swap in the page by read contents from the swap disk. */
 static bool anon_swap_in(struct page *page, void *kva) {
-  printf("💛 여기까진 실행됨\n");
-  struct thread *t = thread_current();
-  bool succ = false;
-
-  if (!t->pml4) {
-    printf("no pml4\n");
-    return false;
-  }
-
   struct anon_page *anon_page = &page->anon;
-  enum vm_type type = page_get_type(page);
-  bool writable = page->writable;
-  void *va = page->va;
-
-  if (pml4_get_page(t->pml4, va) != NULL) {
-    printf("evict the page?\n");
-  } else {
-    succ = pml4_set_page(t->pml4, va, kva, writable);
-    printf("💛 va: %p, kva: %p, writable: %d, succ: %d\n", va, kva, writable,
-           succ);
-  }
-
-  return succ;
+  return true;
 }
 
 /* Swap out the page by writing contents to the swap disk. */
