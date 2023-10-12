@@ -79,8 +79,7 @@ err:
 }
 
 /* Find VA from spt and return page. On error, return NULL. */
-struct page *spt_find_page(struct supplemental_page_table *spt UNUSED,
-                           void *va UNUSED) {
+struct page *spt_find_page(struct supplemental_page_table *spt, void *va) {
   struct page *page = NULL;
   struct page tmp;
   tmp.va = pg_round_down(va);
@@ -136,8 +135,8 @@ static struct frame *vm_evict_frame(void) {
  * space.*/
 static struct frame *vm_get_frame(void) {
   struct frame *frame = NULL;
-  /* TODO: Fill this function. */
-  frame = palloc_get_page(PAL_USER | PAL_ZERO | PAL_ASSERT);
+  frame = malloc(sizeof(struct frame));
+  frame->kva = palloc_get_page(PAL_USER | PAL_ZERO | PAL_ASSERT);
 
   ASSERT(frame != NULL);
   ASSERT(frame->page == NULL);
