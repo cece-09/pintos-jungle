@@ -61,7 +61,7 @@ BAD_READ2="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/bad-read2:b
 BAD_WRITE2="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/bad-write2:bad-write2 --swap-disk=4 -- -q   -f run bad-write2"
 BAD_JUMP="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/bad-jump:bad-jump --swap-disk=4 -- -q   -f run bad-jump"
 BAD_JUMP2="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/bad-jump2:bad-jump2 --swap-disk=4 -- -q   -f run bad-jump2"
-PT_GROW_STACK="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/pt-grow-stack:pt-grow-stack --swap-disk=4 -- -q   -f run pt-grow-stack"
+PT_GROW_STACK="pintos -v -k -m 20  --fs-disk=10 -p tests/vm/pt-grow-stack:pt-grow-stack --swap-disk=4 -- -q   -f run pt-grow-stack"
 PT_GROW_BAD="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/pt-grow-bad:pt-grow-bad --swap-disk=4 -- -q   -f run pt-grow-bad"
 PT_BIG_STK_OBJ="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/pt-big-stk-obj:pt-big-stk-obj --swap-disk=4 -- -q   -f run pt-big-stk-obj"
 PT_BAD_ADDR="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/pt-bad-addr:pt-bad-addr --swap-disk=4 -- -q   -f run pt-bad-addr"

@@ -80,17 +80,18 @@ err:
 
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *spt_find_page(struct supplemental_page_table *spt, void *va) {
+  struct hash_elem *spt_elem;
   struct page *page = NULL;
   struct page tmp;
   tmp.va = pg_round_down(va);
-  printf("💜 find %p\n", tmp.va);
 
-  page = hash_find(&spt->hash, &tmp.elem);
-  if (page == NULL) {
-    printf("spt_find_page: page not found\n");
-  } else {
-    printf("🔥 find va: %p, %p\n", page->va, vtop(page->va));
+  spt_elem = hash_find(&spt->hash, &tmp.elem);
+  if (spt_elem == NULL) {
+    return NULL;
   }
+
+  page = hash_entry(spt_elem, struct page, elem);
+  printf("🔥 find va: %p, %p\n", page->va, vtop(page->va));
 
   return page;
 }
