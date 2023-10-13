@@ -38,6 +38,7 @@ struct page_operations;
 struct thread;
 
 #define VM_TYPE(type) ((type) & 7)
+#define pg_writable(page) ((page->flags & PTE_W ) != 0)
 
 /* The representation of "page".
  * This is kind of "parent class", which has four "child class"es, which are
@@ -51,8 +52,8 @@ struct page {
   /* Your implementation */
   /* SPT - for hash table */
   struct hash_elem elem;
-  bool writable;
-
+  uint16_t flags;
+  
   /* Per-type data are binded into the union.
    * Each function automatically detects the current union */
   union {
@@ -92,6 +93,7 @@ struct page_operations {
  * All designs up to you for this. */
 struct supplemental_page_table {
   /* SPT - Use hash table. */
+  void* stack_bottom;
   struct hash hash;
 };
 

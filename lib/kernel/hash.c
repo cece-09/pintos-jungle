@@ -5,6 +5,7 @@
 
    See hash.h for basic information. */
 
+#include <stdio.h>
 #include "hash.h"
 
 #include "../debug.h"
@@ -146,7 +147,6 @@ void hash_apply(struct hash *h, hash_action_func *action) {
   for (i = 0; i < h->bucket_cnt; i++) {
     struct list *bucket = &h->buckets[i];
     struct list_elem *elem, *next;
-    if (list_empty(bucket)) continue;
 
     for (elem = list_begin(bucket); elem != list_end(bucket); elem = next) {
       next = list_next(elem);

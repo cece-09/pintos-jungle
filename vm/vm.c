@@ -4,10 +4,9 @@
 #include <stdio.h>
 
 #include "threads/malloc.h"
+#include "threads/pte.h"
 #include "threads/vaddr.h"
 #include "vm/inspect.h"
-
-static uint64_t hash_key;
 
 static uint64_t spt_hash_func(const struct hash_elem *, void *);
 static bool spt_hash_less_func(const struct hash_elem *,
@@ -54,13 +53,17 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
   ASSERT(VM_TYPE(type) != VM_UNINIT)
 
   struct supplemental_page_table *spt = &thread_current()->spt;
-  struct page *page = malloc(sizeof(struct page));
-
-  /* page가 할당되고 난 후 설정되어야 하는 쓰기 권한? */
-  page->writable = writable;
+  struct page *page = calloc(1, sizeof(struct page));
 
   /* Check wheter the upage is already occupied or not. */
   if (spt_find_page(spt, upage) == NULL) {
+    /* If upage is stack bottom, claim immediately. */
+    // if (upage == spt->stack_bottom) {
+    //   uninit_new(page, upage, vm_stack_growth, type, aux, anon_initializer);
+    //   return vm_do_claim_page(page);
+    // }
+
+    /* If upage is not a stack. */
     switch (type) {
       case VM_ANON:
         uninit_new(page, upage, init, type, aux, anon_initializer);
@@ -71,15 +74,16 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
       default:
         break;
     }
+
+    /* Fill extra fields. */
+    /* If page is writable. */
+    if (writable) {
+      page->flags = page->flags | PTE_W;
+    }
     if (!spt_insert_page(spt, page)) {
-      printf("spt_insert_page: spt insert failed\n");
+      printf("vm.c:75 spt insert failed\n");
       goto err;
     }
-
-    // /* If stack, */
-    // if (upage == 0x4747f000) {
-    //   return vm_do_claim_page(page);
-    // }
     return true;
   }
 err:
@@ -153,6 +157,7 @@ static struct frame *vm_get_frame(void) {
 
   frame->kva = palloc_get_page(PAL_USER | PAL_ZERO | PAL_ASSERT);
   if (frame->kva == NULL) {
+    free(frame);
     printf("Memory is full.\n");
   }
 
@@ -170,13 +175,14 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
-
   struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
   struct page *page = spt_find_page(spt, addr);
 
-  /* TODO: Validate the fault */
   /* TODO: Your code goes here */
   if (page == NULL) {
+    // printf("🔥 fault addr: %p\n", addr);
+    // printf("🔥 stack bottom: %p\n", (void *)(((uint8_t *)USER_STACK) -
+    // PGSIZE));
     return false;
   }
   return vm_do_claim_page(page);
@@ -212,7 +218,7 @@ static bool vm_do_claim_page(struct page *page) {
 
 /* SPT - Initialize new supplemental page table */
 void supplemental_page_table_init(struct supplemental_page_table *spt) {
-  hash_key = 0;
+  spt->stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
   if (!hash_init(&spt->hash, spt_hash_func, spt_hash_less_func, NULL)) {
     PANIC("spt not initialized!\n");
   }
@@ -229,13 +235,14 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt) {
    * TODO: writeback all the modified contents to the storage. */
   /* TODO: swap in/out or file-mapped by mmap - writeback. */
   /* SPT - writeback. */
-  if (spt) hash_apply(spt, spt_free_page);
+  if (spt) hash_destroy(&spt->hash, spt_free_page);
+//   hash_init(&spt->hash, spt_hash_func, spt_hash_less_func, NULL);
   return;
 }
 
 static uint64_t spt_hash_func(const struct hash_elem *e, void *aux UNUSED) {
   struct page *page = hash_entry(e, struct page, elem);
-  return ((uint64_t)page->va >> 12);
+  return hash_bytes(&page->va, sizeof(page->va));
 }
 
 static bool spt_hash_less_func(const struct hash_elem *_a,

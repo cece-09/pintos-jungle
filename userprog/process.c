@@ -240,6 +240,9 @@ int process_exec(void *f_name) {
   /* We first kill the current context */
   process_cleanup();
 
+  /* Create new spt. */
+  supplemental_page_table_init(&curr->spt);
+
   /* And then load the binary */
   success = load(file_name, &_if);
 
@@ -818,41 +821,42 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   /* TODO: This called when the first page fault occurs on address VA. */
   /* TODO: VA is available when calling this function. */
   struct thread *curr = thread_current();
+  void *upage = page->va;
   bool succ = false;
 
   /* Get a page of memory. */
   struct frame *frame = page->frame;
   void *kva = frame->kva;
   if (frame == NULL || kva == NULL) {
-    PANIC("No frame is allocated.\n");
+    PANIC("process.c:827 No frame is allocated.\n");
   }
+
+  /* File information to read. */
   struct file_info *file_info = (struct file_info *)aux;
   struct file *file = file_info->file;
   uint32_t bytes = file_info->bytes;
   off_t ofs = file_info->ofs;
-  void *upage = page->va;
+  bool writable = pg_writable(page);
 
   /* Load this page. */
-
   file_seek(file, ofs);
-
   if (file_read(file, kva, bytes) != (int)bytes) {
-    printf("file not read properly!\n");
+    PANIC("process.c:838 File is not read properly.\n");
   }
 
+  /* Set page in current thread's pml4. */
   if (pml4_get_page(curr->pml4, page->va) != NULL) {
     printf("evict the page?\n");
   } else {
-    succ = pml4_set_page(curr->pml4, page->va, kva, true);
+    succ = pml4_set_page(curr->pml4, page->va, kva, writable);
   }
 
+  /* Free file info. */
+  free(file_info);
   return succ;
 }
 
-static bool stack_grows(struct page *page, void *aux) {
-  
-  return true;
-}
+static bool stack_grows(struct page *page, void *aux) { return true; }
 
 /* Loads a segment starting at offset OFS in FILE at address
  * UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
@@ -876,7 +880,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
   ASSERT(pg_ofs(upage) == 0);
   ASSERT(ofs % PGSIZE == 0);
 
-  off_t start = ofs;  // 파일 읽기를 시작할 오프셋
+  off_t read_start = ofs;  // 파일 읽기를 시작할 오프셋
 
   while (read_bytes > 0 || zero_bytes > 0) {
     /* Do calculate how to fill this page.
@@ -886,9 +890,9 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
     size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
     /* TODO: Set up aux to pass information to the lazy_load_segment. */
-    struct file_info *aux = malloc(sizeof(struct file_info));
+    struct file_info *aux = calloc(1, sizeof(struct file_info));
     aux->file = file;
-    aux->ofs = start;
+    aux->ofs = read_start;
     aux->bytes = page_read_bytes;
 
     if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable,
@@ -896,7 +900,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
       return false;
 
     /* Advance. */
-    start += page_read_bytes;
+    read_start += page_read_bytes;
     read_bytes -= page_read_bytes;
     zero_bytes -= page_zero_bytes;
     upage += PGSIZE;
@@ -906,24 +910,8 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
 static bool setup_stack(struct intr_frame *if_) {
-  // bool success = false;
   void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
-  //   printf("💛 stack bottom: %p\n", stack_bottom);
-
-  //   success = vm_alloc_page_with_initializer(VM_ANON, stack_bottom, true,
-  //                                            stack_grows, NULL);
-  //   if (success) if_->rsp = USER_STACK;
-
-  //   /* TODO: Map the stack on stack_bottom and claim the page immediately.
-  //    * TODO: If success, set the rsp accordingly.
-  //    * TODO: You should mark the page is stack. */
-  //   /* TODO: Your code goes here */
-
-  //   return success;
   struct thread *t = thread_current();
-
-  /* Verify that there's not already a page at that virtual
-   * address, then map our page there. */
 
   uint8_t *kpage;
   bool success = false;
