@@ -170,11 +170,13 @@ static struct frame *vm_get_frame(void) {
     printf("Frame allocation failed.\n");
     return NULL;
   }
-
-  frame->kva = palloc_get_page(PAL_USER | PAL_ZERO | PAL_ASSERT);
+  
+  /* Get anonymous frame. */
+  frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
   if (frame->kva == NULL) {
     free(frame);
     printf("Memory is full.\n");
+    return NULL;
   }
 
   ASSERT(frame != NULL);
@@ -267,9 +269,23 @@ void supplemental_page_table_init(struct supplemental_page_table *spt) {
   return;
 }
 
+static void spt_copy_page(struct hash_elem *e, void *aux) {
+  struct hash* dsc_hash = (struct hash*)aux;
+  struct page* src_page = hash_entry(e, struct page, elem);
+  struct page* dsc_page = malloc(sizeof(struct page));
+  memcpy(dsc_page, src_page, sizeof(struct page));
+  dsc_page->frame = NULL;
+  hash_insert(dsc_hash, &dsc_page->elem);
+}
+
 /* SPT - Copy supplemental page table from src to dst */
-bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
-                                  struct supplemental_page_table *src UNUSED) {}
+bool supplemental_page_table_copy(struct supplemental_page_table *dsc ,
+                                  struct supplemental_page_table *src ) {
+    src->hash.aux = &dsc->hash;
+    hash_apply(&src->hash, spt_copy_page);
+    src->hash.aux = NULL;
+    return true;
+}
 
 /* SPT - Free the resource hold by the supplemental page table */
 void supplemental_page_table_kill(struct supplemental_page_table *spt) {
@@ -281,6 +297,9 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt) {
   if (spt) hash_destroy(&spt->hash, spt_free_page);
   return;
 }
+
+
+
 
 static uint64_t spt_hash_func(const struct hash_elem *e, void *aux UNUSED) {
   struct page *page = hash_entry(e, struct page, elem);
