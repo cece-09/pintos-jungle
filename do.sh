@@ -147,9 +147,9 @@ COW_SIMPLE="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/cow/cow-simple:c
 
 cd vm
 make clean
-make
+make -j
 cd build
 source ../../activate
 
-$PT_BIG_STK_OBJ
+$PT_WRITE_CODE
 # pintos -v -k  -m 20  --fs-disk=10 -p tests/userprog/args-multiple:args-multiple --swap-disk=4 -- -q   -f run 'args-multiple some arguments for you!'

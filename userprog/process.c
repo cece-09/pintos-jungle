@@ -850,7 +850,6 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   } else {
     succ = pml4_set_page(curr->pml4, page->va, kva, writable);
   }
-  succ = true;
 
   /* Free file info. */
   free(file_info);

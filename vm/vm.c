@@ -203,11 +203,11 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
   struct supplemental_page_table *spt = &thread_current()->spt;
   void *curr_rsp = (void *)f->rsp;
-
+  
+  /* Validate stack overflow. */
   if (spt->stack_bottom - STACK_VALID <= addr && addr < spt->stack_bottom) {
     /* If current stack is not full, not a stack overflow. */
     if (curr_rsp != addr) return false;
-
     /* If stack overflow */
     return vm_stack_growth(pg_round_down(addr));
   }
@@ -217,6 +217,13 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   if (page == NULL) {
     return false;
   }
+
+  /* If page is unwritable, return false. */
+  if(!pg_writable(page)) {
+    return false;
+  }
+
+  /* Else, lazy loading. */
   return vm_do_claim_page(page);
 }
 
