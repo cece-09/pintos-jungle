@@ -850,6 +850,7 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   } else {
     succ = pml4_set_page(curr->pml4, page->va, kva, writable);
   }
+  succ = true;
 
   /* Free file info. */
   free(file_info);
@@ -896,8 +897,9 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
     aux->bytes = page_read_bytes;
 
     if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable,
-                                        lazy_load_segment, aux))
+                                        lazy_load_segment, aux)) {
       return false;
+    }
 
     /* Advance. */
     read_start += page_read_bytes;
@@ -911,20 +913,24 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
 static bool setup_stack(struct intr_frame *if_) {
   void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
-  struct thread *t = thread_current();
+    struct thread *t = thread_current();
 
-  uint8_t *kpage;
+    uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page(PAL_USER | PAL_ZERO);
-  if (kpage != NULL) {
-    success = pml4_get_page(t->pml4, stack_bottom) == NULL &&
-              pml4_set_page(t->pml4, stack_bottom, kpage, true);
-    if (success)
-      if_->rsp = USER_STACK;
-    else
-      palloc_free_page(kpage);
-  }
+    kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+    if (kpage != NULL) {
+      success = pml4_get_page(t->pml4, stack_bottom) == NULL &&
+                pml4_set_page(t->pml4, stack_bottom, kpage, true);
+      if (success)
+        if_->rsp = USER_STACK;
+      else
+        palloc_free_page(kpage);
+    }
+//   if (vm_alloc_page(VM_ANON, stack_bottom, true)) {
+//     printf("🔥 일단 스택 페이지 쌓기 성공!!\n");
+//     success = true;
+//   }
   return success;
 }
 #endif /* VM */

@@ -59,7 +59,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
   if (spt_find_page(spt, upage) == NULL) {
     /* If upage is stack bottom, claim immediately. */
     // if (upage == spt->stack_bottom) {
-    //   uninit_new(page, upage, vm_stack_growth, type, aux, anon_initializer);
+    //   uninit_new(page, upage, init, type, aux, anon_initializer);
     //   return vm_do_claim_page(page);
     // }
 
@@ -83,6 +83,10 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
     if (!spt_insert_page(spt, page)) {
       printf("vm.c:75 spt insert failed\n");
       goto err;
+    }
+    /* 만약 스택 페이지이면 즉시 claim */
+    if(upage == spt->stack_bottom) {
+        return vm_do_claim_page(page);
     }
     return true;
   }
@@ -167,7 +171,11 @@ static struct frame *vm_get_frame(void) {
 }
 
 /* Growing the stack. */
-static void vm_stack_growth(void *addr UNUSED) {}
+static bool vm_stack_growth(void *addr UNUSED) {
+    // do_claim
+    // pml4 연결
+    
+}
 
 /* Handle the fault on write_protected page */
 static bool vm_handle_wp(struct page *page UNUSED) {}
@@ -236,7 +244,7 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt) {
   /* TODO: swap in/out or file-mapped by mmap - writeback. */
   /* SPT - writeback. */
   if (spt) hash_destroy(&spt->hash, spt_free_page);
-//   hash_init(&spt->hash, spt_hash_func, spt_hash_less_func, NULL);
+  //   hash_init(&spt->hash, spt_hash_func, spt_hash_less_func, NULL);
   return;
 }
 

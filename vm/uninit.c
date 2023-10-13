@@ -10,6 +10,7 @@
 
 #include "vm/vm.h"
 #include "vm/uninit.h"
+#include "threads/pte.h"
 
 #include <stdio.h>
 
@@ -44,11 +45,19 @@ void uninit_new(struct page *page, void *va, vm_initializer *init,
 
 /* Initalize the page on first fault */
 static bool uninit_initialize(struct page *page, void *kva) {
+  struct thread* curr = thread_current();
   struct uninit_page *uninit = &page->uninit;
+  bool writable = pg_writable(page);
 
   /* Fetch first, page_initialize may overwrite the values */
   vm_initializer *init = uninit->init;
   void *aux = uninit->aux;
+
+//   if (pml4_get_page(curr->pml4, page->va) != NULL) {
+//     printf("evict the page?\n");
+//   } else if(!pml4_set_page(curr->pml4, page->va, kva, writable)) {
+//     return false;
+//   }
 
   /* TODO: You may need to fix this function. */
   return uninit->page_initializer(page, uninit->type, kva) &&
