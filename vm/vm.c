@@ -219,7 +219,7 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   }
 
   /* If page is unwritable, return false. */
-  if(!pg_writable(page)) {
+  if(write && !pg_writable(page)) {
     return false;
   }
 
