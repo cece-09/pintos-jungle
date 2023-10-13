@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "threads/malloc.h"
+#include "threads/mmu.h"
 #include "threads/pte.h"
 #include "threads/vaddr.h"
 #include "vm/inspect.h"
@@ -43,6 +44,22 @@ enum vm_type page_get_type(struct page *page) {
 static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
+static bool install_page(struct page *page);
+
+
+static bool install_page(struct page *page) {
+  struct thread *curr = thread_current();
+  bool writable = pg_writable(page);
+  void *kva = page->frame->kva;
+
+  ASSERT(kva)
+
+  if (pml4_get_page(curr->pml4, page->va) != NULL) {
+    printf("evict the page?\n");
+    return false;
+  }
+  return pml4_set_page(curr->pml4, page->va, kva, true);
+}
 
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
@@ -57,12 +74,6 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 
   /* Check wheter the upage is already occupied or not. */
   if (spt_find_page(spt, upage) == NULL) {
-    /* If upage is stack bottom, claim immediately. */
-    // if (upage == spt->stack_bottom) {
-    //   uninit_new(page, upage, init, type, aux, anon_initializer);
-    //   return vm_do_claim_page(page);
-    // }
-
     /* If upage is not a stack. */
     switch (type) {
       case VM_ANON:
@@ -75,18 +86,17 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
         break;
     }
 
-    /* Fill extra fields. */
     /* If page is writable. */
-    if (writable) {
-      page->flags = page->flags | PTE_W;
-    }
+    if (writable) page->flags = page->flags | PTE_W;
+
+    /* Insert page into spt. */
     if (!spt_insert_page(spt, page)) {
       printf("vm.c:75 spt insert failed\n");
       goto err;
     }
     /* 만약 스택 페이지이면 즉시 claim */
-    if(upage == spt->stack_bottom) {
-        return vm_do_claim_page(page);
+    if (upage == spt->stack_bottom && vm_do_claim_page(page)) {
+      return install_page(page);
     }
     return true;
   }
@@ -171,10 +181,10 @@ static struct frame *vm_get_frame(void) {
 }
 
 /* Growing the stack. */
-static bool vm_stack_growth(void *addr UNUSED) {
-    // do_claim
-    // pml4 연결
-    
+static bool vm_stack_growth(void *addr) {
+    struct supplemental_page_table *spt = &thread_current()->spt;
+    spt->stack_bottom = addr;
+    return vm_alloc_page(VM_ANON, addr, true);
 }
 
 /* Handle the fault on write_protected page */
@@ -183,7 +193,12 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
-  struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
+  struct supplemental_page_table *spt = &thread_current()->spt;
+
+  /* If stack overflow, */
+  if(spt->stack_bottom - PGSIZE <= addr && addr < spt->stack_bottom) {
+    return vm_stack_growth(pg_round_down(addr));
+  }
   struct page *page = spt_find_page(spt, addr);
 
   /* TODO: Your code goes here */

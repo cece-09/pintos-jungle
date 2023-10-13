@@ -53,12 +53,6 @@ static bool uninit_initialize(struct page *page, void *kva) {
   vm_initializer *init = uninit->init;
   void *aux = uninit->aux;
 
-//   if (pml4_get_page(curr->pml4, page->va) != NULL) {
-//     printf("evict the page?\n");
-//   } else if(!pml4_set_page(curr->pml4, page->va, kva, writable)) {
-//     return false;
-//   }
-
   /* TODO: You may need to fix this function. */
   return uninit->page_initializer(page, uninit->type, kva) &&
          (init ? init(page, aux) : true);

@@ -913,24 +913,12 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
 static bool setup_stack(struct intr_frame *if_) {
   void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
-    struct thread *t = thread_current();
-
-    uint8_t *kpage;
   bool success = false;
 
-    kpage = palloc_get_page(PAL_USER | PAL_ZERO);
-    if (kpage != NULL) {
-      success = pml4_get_page(t->pml4, stack_bottom) == NULL &&
-                pml4_set_page(t->pml4, stack_bottom, kpage, true);
-      if (success)
-        if_->rsp = USER_STACK;
-      else
-        palloc_free_page(kpage);
-    }
-//   if (vm_alloc_page(VM_ANON, stack_bottom, true)) {
-//     printf("🔥 일단 스택 페이지 쌓기 성공!!\n");
-//     success = true;
-//   }
+  if (vm_alloc_page(VM_ANON, stack_bottom, true)) {
+    if_->rsp = USER_STACK;
+    success = true;
+  }
   return success;
 }
 #endif /* VM */
