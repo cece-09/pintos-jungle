@@ -151,5 +151,5 @@ make
 cd build
 source ../../activate
 
-$PT_GROW_STACK
+$PT_BIG_STK_OBJ
 # pintos -v -k  -m 20  --fs-disk=10 -p tests/userprog/args-multiple:args-multiple --swap-disk=4 -- -q   -f run 'args-multiple some arguments for you!'

@@ -816,10 +816,10 @@ static struct file_info {
   struct file *file; /* file */
 };
 
+/* SPT - Load the segment from the file.
+ * This called when the first page fault occurs on address VA.
+ * VA is available when calling this function. */
 static bool lazy_load_segment(struct page *page, void *aux) {
-  /* TODO: Load the segment from the file */
-  /* TODO: This called when the first page fault occurs on address VA. */
-  /* TODO: VA is available when calling this function. */
   struct thread *curr = thread_current();
   void *upage = page->va;
   bool succ = false;
@@ -857,8 +857,6 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   return succ;
 }
 
-static bool stack_grows(struct page *page, void *aux) { return true; }
-
 /* Loads a segment starting at offset OFS in FILE at address
  * UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
  * memory are initialized, as follows:
@@ -873,7 +871,6 @@ static bool stack_grows(struct page *page, void *aux) { return true; }
  *
  * Return true if successful, false if a memory allocation error
  * or disk read error occurs. */
-
 static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
                          uint32_t read_bytes, uint32_t zero_bytes,
                          bool writable) {
@@ -890,7 +887,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
     size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
     size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-    /* TODO: Set up aux to pass information to the lazy_load_segment. */
+    /* SPT - Set up aux to pass information to the lazy_load_segment. */
     struct file_info *aux = calloc(1, sizeof(struct file_info));
     aux->file = file;
     aux->ofs = read_start;

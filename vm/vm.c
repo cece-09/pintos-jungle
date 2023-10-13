@@ -9,6 +9,9 @@
 #include "threads/vaddr.h"
 #include "vm/inspect.h"
 
+#define STACK_VALID (PGSIZE / 2)
+#define STACK_LIMIT (USER_STACK - (1 << 20))
+
 static uint64_t spt_hash_func(const struct hash_elem *, void *);
 static bool spt_hash_less_func(const struct hash_elem *,
                                const struct hash_elem *, void *);
@@ -45,7 +48,6 @@ static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
 static bool install_page(struct page *page);
-
 
 static bool install_page(struct page *page) {
   struct thread *curr = thread_current();
@@ -182,9 +184,15 @@ static struct frame *vm_get_frame(void) {
 
 /* Growing the stack. */
 static bool vm_stack_growth(void *addr) {
-    struct supplemental_page_table *spt = &thread_current()->spt;
-    spt->stack_bottom = addr;
-    return vm_alloc_page(VM_ANON, addr, true);
+  /* If addr exceeds STACK_LIMIT, */
+  if (addr <= STACK_LIMIT) {
+    printf("🔥 %p exceed stack limit\n", addr);
+    return false;
+  }
+
+  struct supplemental_page_table *spt = &thread_current()->spt;
+  spt->stack_bottom = addr;
+  return vm_alloc_page(VM_ANON, addr, true);
 }
 
 /* Handle the fault on write_protected page */
@@ -194,18 +202,19 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
   struct supplemental_page_table *spt = &thread_current()->spt;
+  void *curr_rsp = (void *)f->rsp;
 
-  /* If stack overflow, */
-  if(spt->stack_bottom - PGSIZE <= addr && addr < spt->stack_bottom) {
+  if (spt->stack_bottom - STACK_VALID <= addr && addr < spt->stack_bottom) {
+    /* If current stack is not full, not a stack overflow. */
+    if (curr_rsp != addr) return false;
+
+    /* If stack overflow */
     return vm_stack_growth(pg_round_down(addr));
   }
-  struct page *page = spt_find_page(spt, addr);
 
-  /* TODO: Your code goes here */
+  /* Else, search for page in spt. */
+  struct page *page = spt_find_page(spt, addr);
   if (page == NULL) {
-    // printf("🔥 fault addr: %p\n", addr);
-    // printf("🔥 stack bottom: %p\n", (void *)(((uint8_t *)USER_STACK) -
-    // PGSIZE));
     return false;
   }
   return vm_do_claim_page(page);
@@ -241,7 +250,10 @@ static bool vm_do_claim_page(struct page *page) {
 
 /* SPT - Initialize new supplemental page table */
 void supplemental_page_table_init(struct supplemental_page_table *spt) {
+  /* Set stack bottom. */
   spt->stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
+
+  /* Initialize hash table. */
   if (!hash_init(&spt->hash, spt_hash_func, spt_hash_less_func, NULL)) {
     PANIC("spt not initialized!\n");
   }
@@ -257,9 +269,9 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt) {
   /* TODO: Destroy all the supplemental_page_table hold by thread and
    * TODO: writeback all the modified contents to the storage. */
   /* TODO: swap in/out or file-mapped by mmap - writeback. */
+
   /* SPT - writeback. */
   if (spt) hash_destroy(&spt->hash, spt_free_page);
-  //   hash_init(&spt->hash, spt_hash_func, spt_hash_less_func, NULL);
   return;
 }
 
