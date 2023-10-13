@@ -6,6 +6,6 @@
 # cece-09
 .vscode/
 @notes/
-
-
+*.s
+test3.c
 .gdb_history

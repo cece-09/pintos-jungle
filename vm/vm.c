@@ -9,7 +9,6 @@
 #include "threads/vaddr.h"
 #include "vm/inspect.h"
 
-#define STACK_VALID (PGSIZE / 2)
 #define STACK_LIMIT (USER_STACK - (1 << 20))
 
 static uint64_t spt_hash_func(const struct hash_elem *, void *);
@@ -170,7 +169,7 @@ static struct frame *vm_get_frame(void) {
     printf("Frame allocation failed.\n");
     return NULL;
   }
-  
+
   /* Get anonymous frame. */
   frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
   if (frame->kva == NULL) {
@@ -188,7 +187,6 @@ static struct frame *vm_get_frame(void) {
 static bool vm_stack_growth(void *addr) {
   /* If addr exceeds STACK_LIMIT, */
   if (addr <= STACK_LIMIT) {
-    printf("🔥 %p exceed stack limit\n", addr);
     return false;
   }
 
@@ -205,9 +203,9 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
   struct supplemental_page_table *spt = &thread_current()->spt;
   void *curr_rsp = (void *)f->rsp;
-  
+
   /* Validate stack overflow. */
-  if (spt->stack_bottom - STACK_VALID <= addr && addr < spt->stack_bottom) {
+  if (STACK_LIMIT < addr && addr < spt->stack_bottom) {
     /* If current stack is not full, not a stack overflow. */
     if (curr_rsp != addr) return false;
     /* If stack overflow */
@@ -221,7 +219,7 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   }
 
   /* If page is unwritable, return false. */
-  if(write && !pg_writable(page)) {
+  if (write && !pg_writable(page)) {
     return false;
   }
 
@@ -270,21 +268,21 @@ void supplemental_page_table_init(struct supplemental_page_table *spt) {
 }
 
 static void spt_copy_page(struct hash_elem *e, void *aux) {
-  struct hash* dsc_hash = (struct hash*)aux;
-  struct page* src_page = hash_entry(e, struct page, elem);
-  struct page* dsc_page = malloc(sizeof(struct page));
+  struct hash *dsc_hash = (struct hash *)aux;
+  struct page *src_page = hash_entry(e, struct page, elem);
+  struct page *dsc_page = malloc(sizeof(struct page));
   memcpy(dsc_page, src_page, sizeof(struct page));
   dsc_page->frame = NULL;
   hash_insert(dsc_hash, &dsc_page->elem);
 }
 
 /* SPT - Copy supplemental page table from src to dst */
-bool supplemental_page_table_copy(struct supplemental_page_table *dsc ,
-                                  struct supplemental_page_table *src ) {
-    src->hash.aux = &dsc->hash;
-    hash_apply(&src->hash, spt_copy_page);
-    src->hash.aux = NULL;
-    return true;
+bool supplemental_page_table_copy(struct supplemental_page_table *dsc,
+                                  struct supplemental_page_table *src) {
+  src->hash.aux = &dsc->hash;
+  hash_apply(&src->hash, spt_copy_page);
+  src->hash.aux = NULL;
+  return true;
 }
 
 /* SPT - Free the resource hold by the supplemental page table */
@@ -297,9 +295,6 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt) {
   if (spt) hash_destroy(&spt->hash, spt_free_page);
   return;
 }
-
-
-
 
 static uint64_t spt_hash_func(const struct hash_elem *e, void *aux UNUSED) {
   struct page *page = hash_entry(e, struct page, elem);

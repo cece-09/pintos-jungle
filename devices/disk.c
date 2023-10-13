@@ -9,7 +9,11 @@
 #include "threads/synch.h"
 
 /* The code in this file is an interface to an ATA (IDE)
-   controller.  It attempts to comply to [ATA-3]. */
+   controller.  It attempts to comply to [ATA-3].
+
+   ATA는 컴퓨터와 하드 드라이브 간의 인터페이스 표준이다.
+   CPU와 하드 드라이브 또는 CD-ROM 사이의 데이터 전송을 관리한다.   
+ */
 
 /* ATA command block port addresses. */
 #define reg_data(CHANNEL) ((CHANNEL)->reg_base + 0)     /* Data. */
