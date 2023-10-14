@@ -251,7 +251,6 @@ int process_exec(void *f_name) {
   /* If load failed, quit. */
   palloc_free_page(file_name);
   if (!success) {
-    process_cleanup();
     return -1;
   }
 
