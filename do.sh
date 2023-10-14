@@ -151,6 +151,7 @@ make -j
 cd build
 source ../../activate
 
-# $PT_GROW_BAD
-$PT_BIG_STK_OBJ
+$ARGS_NONE
+# $PT_WRITE_CODE
+# $PT_WRITE_CODE
 # pintos -v -k  -m 20  --fs-disk=10 -p tests/userprog/args-multiple:args-multiple --swap-disk=4 -- -q   -f run 'args-multiple some arguments for you!'

@@ -38,7 +38,10 @@ struct page_operations;
 struct thread;
 
 #define VM_TYPE(type) ((type) & 7)
+
+/* Check page flag bits. */
 #define pg_writable(page) ((page->flags & PTE_W ) != 0)
+#define pg_present(page) ((page->flags & PTE_P ) != 0)
 
 /* The representation of "page".
  * This is kind of "parent class", which has four "child class"es, which are
@@ -95,6 +98,11 @@ struct supplemental_page_table {
   /* SPT - Use hash table. */
   void* stack_bottom;
   struct hash hash;
+};
+
+/* Swap table structure. */
+struct swap_page_table {
+
 };
 
 #include "threads/thread.h"

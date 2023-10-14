@@ -4,6 +4,7 @@
 
 #include "devices/disk.h"
 #include "vm/vm.h"
+#include "vm/anon.h"
 
 /* DO NOT MODIFY BELOW LINE */
 static struct disk *swap_disk;
@@ -21,8 +22,8 @@ static const struct page_operations anon_ops = {
 
 /* Initialize the data for anonymous pages */
 void vm_anon_init(void) {
-  /* TODO: Set up the swap_disk. */
-  swap_disk = NULL;
+  /* Set up the swap_disk. */
+  swap_disk = disk_get(1, 1);
 }
 
 /* Initialize the file mapping */
@@ -30,7 +31,10 @@ bool anon_initializer(struct page *page, enum vm_type type, void *kva) {
   /* Set up the handler */
   page->operations = &anon_ops;
   struct anon_page *anon_page = &page->anon;
-  
+
+  *anon_page = (struct anon_page){
+                    .disk_sec = 0,
+                };
   return true;
 }
 
@@ -42,7 +46,12 @@ static bool anon_swap_in(struct page *page, void *kva) {
 
 /* Swap out the page by writing contents to the swap disk. */
 static bool anon_swap_out(struct page *page) {
+  ASSERT(page->frame && page->frame->kva)
+
   struct anon_page *anon_page = &page->anon;
+
+  /* find free disk sector */
+//   disk_write(swap_disk, anon_page->disk_sec)
 }
 
 /* Destroy the anonymous page. PAGE will be freed by the caller. */

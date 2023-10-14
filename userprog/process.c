@@ -839,16 +839,21 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   bool writable = pg_writable(page);
 
   /* Load this page. */
+  printf("🚨 file: %p, ofs: %d, bytes: %d\n", file, ofs, bytes);
   file_seek(file, ofs);
   if (file_read(file, kva, bytes) != (int)bytes) {
     PANIC("process.c:838 File is not read properly.\n");
   }
 
   /* Set page in current thread's pml4. */
-  if (pml4_get_page(curr->pml4, page->va) != NULL) {
+  if (pml4_get_page(curr->pml4, upage) != NULL) {
     printf("evict the page?\n");
   } else {
-    succ = pml4_set_page(curr->pml4, page->va, kva, writable);
+    succ = pml4_set_page(curr->pml4, upage, kva, writable);
+    uint64_t *pte = pml4e_walk(curr->pml4, upage, 0);
+    if (pte) {
+      printf("🩷 pml4: upage %p, writable: %d, pa %p / frame %p\n", upage, is_writable(pte), *pte, kva);
+    }
   }
 
   /* Free file info. */

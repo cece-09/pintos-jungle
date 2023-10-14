@@ -66,7 +66,9 @@ struct disk {
 };
 
 /* An ATA channel (aka controller).
-   Each channel can control up to two disks. */
+   Each channel can control up to two disks.
+   ATA 채널은 최대 두 개의 ATA 디바이스(Master/Slave)를
+   시스템에 연결하기 위한 경로를 제공한다. */
 struct channel {
 	char name[8];               /* Name, e.g. "hd0". */
 	uint16_t reg_base;          /* Base I/O port. */
@@ -180,11 +182,20 @@ disk_print_stats (void) {
 /* Returns the disk numbered DEV_NO--either 0 or 1 for master or
    slave, respectively--within the channel numbered CHAN_NO.
 
+   DEV_NO로 번호 지정된 디스크를 반환합니다. 0 또는 1은 각각 마스터와 슬레이브를 나타냅니다.
+   이는 CHAN_NO로 번호 지정된 채널 내에서 사용됩니다.
+
+   Pintos는 디스크를 다음과 같은 방식으로 사용합니다:
+   0:0 - 부트 로더, 커맨드 라인 인수, 그리고 운영 체제 커널
+   0:1 - 파일 시스템
+   1:0 - 스크래치(임시 저장공간)
+   1:1 - 스왑
+
    Pintos uses disks this way:
-0:0 - boot loader, command line args, and operating system kernel
-0:1 - file system
-1:0 - scratch
-1:1 - swap
+   0:0 - boot loader, command line args, and operating system kernel
+   0:1 - file system
+   1:0 - scratch
+   1:1 - swap
 */
 struct disk *
 disk_get (int chan_no, int dev_no) {
