@@ -101,31 +101,6 @@ static void kill(struct intr_frame *f) {
   }
 }
 
-static int64_t get_user(const uint8_t *uaddr) {
-  int64_t result;
-  __asm __volatile(
-      "movabsq $done_get, %0\n"
-      "movzbq %1, %0\n"
-      "done_get:\n"
-      : "=&a"(result)
-      : "m"(*uaddr));
-  return result;
-}
-
-/* Writes BYTE to user address UDST.
- * UDST must be below KERN_BASE.
- * Returns true if successful, false if a segfault occurred. */
-static bool put_user(uint8_t *udst, uint8_t byte) {
-  int64_t error_code;
-  __asm __volatile(
-      "movabsq $done_put, %0\n"
-      "movb %b2, %1\n"
-      "done_put:\n"
-      : "=&a"(error_code), "=m"(*udst)
-      : "q"(byte));
-  return error_code != -1;
-}
-
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.

@@ -837,7 +837,6 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   struct file *file = curr->exec_file;
   uint32_t bytes = file_info->bytes;
   off_t ofs = file_info->ofs;
-  bool writable = pg_writable(page);
 
   /* Load this page. */
   file_seek(file, ofs);

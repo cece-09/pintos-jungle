@@ -105,10 +105,10 @@ struct swap_page_table {
 
 };
 
-/* file-mapped */
+/* Exec file info for loading segment. */
 struct file_info {
   off_t ofs;
-  uint32_t bytes;
+  size_t bytes;
 };
 
 #include "threads/thread.h"

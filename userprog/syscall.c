@@ -7,6 +7,7 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "intrinsic.h"
+#include "threads/mmu.h"
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
@@ -35,6 +36,8 @@ void syscall_handler(struct intr_frame *);
 
 static int allocate_fd(void);
 static void free_fd(int fd);
+static int64_t get_user(const uint8_t *uaddr);
+static bool put_user(uint8_t *udst, uint8_t byte);
 
 void halt(void);
 void exit(int);
@@ -62,7 +65,79 @@ void syscall_init(void) {
             FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
-/* System Call Implementation */
+static bool pg_no_write(void *va) {
+  struct thread *curr = thread_current();
+  uint64_t *pte = pml4e_walk(curr->pml4, (uint64_t)va, 0);
+  return !is_writable(pte);
+}
+
+/* The main system call interface */
+void syscall_handler(struct intr_frame *f) {
+  switch (f->R.rax) {
+    case SYS_HALT: {
+      halt();
+      break;
+    }
+    case SYS_EXIT: {
+      exit((int)f->R.rdi);
+      break;
+    }
+    case SYS_FORK: {
+      f->R.rax = fork((const char *)f->R.rdi, f);
+      break;
+    }
+    case SYS_EXEC: {
+      f->R.rax = exec((const char *)f->R.rdi);
+      break;
+    }
+    case SYS_WAIT: {
+      f->R.rax = wait((tid_t)f->R.rdi);
+      break;
+    }
+    case SYS_CREATE: {
+      f->R.rax = create((char *)f->R.rdi, f->R.rsi);
+      break;
+    }
+    case SYS_REMOVE: {
+      f->R.rax = remove((const char *)f->R.rdi);
+      break;
+    }
+    case SYS_OPEN: {
+      f->R.rax = open((const char *)f->R.rdi);
+      break;
+    }
+    case SYS_FILESIZE: {
+      f->R.rax = filesize((int)f->R.rdi);
+      break;
+    }
+    case SYS_READ: {
+      f->R.rax = read((int)f->R.rdi, (void *)f->R.rsi, (unsigned)f->R.rdx);
+      break;
+    }
+    case SYS_WRITE: {
+      f->R.rax = write((int)f->R.rdi, (void *)f->R.rsi, (unsigned)f->R.rdx);
+      break;
+    }
+    case SYS_SEEK: {
+      seek((int)f->R.rdi, (unsigned)f->R.rsi);
+      break;
+    }
+    case SYS_TELL: {
+      f->R.rax = tell((int)f->R.rdi);
+      break;
+    }
+    case SYS_CLOSE: {
+      close((int)f->R.rdi);
+      break;
+    }
+    case SYS_DUP2: {
+      f->R.rax = dup2((int)f->R.rdi, (int)f->R.rsi);
+      break;
+    }
+    default:
+      break;
+  }
+}
 
 /* Power off system. */
 void halt(void) {
@@ -98,7 +173,6 @@ int open(const char *file_name) {
     return -1;
   }
   curr->fdt[fd] = file;
-
   return fd;
 }
 
@@ -136,6 +210,11 @@ void close(int fd) {
 
 /* Read from file to buffer. */
 int read(int fd, void *buffer, unsigned size) {
+
+  // FIXME: write bit가 0인 페이지에 접근하면 접근 막아야함. (code-write2)
+  if (pg_no_write(buffer)) {
+    exit(-1);
+  }
   if (!is_valid_fd(fd)) return 0;
   struct file **fdt = thread_current()->fdt;
 
@@ -272,74 +351,6 @@ unsigned tell(int fd) {
   return rtn;
 }
 
-/* The main system call interface */
-void syscall_handler(struct intr_frame *f) {
-  switch (f->R.rax) {
-    case SYS_HALT: {
-      halt();
-      break;
-    }
-    case SYS_EXIT: {
-      exit((int)f->R.rdi);
-      break;
-    }
-    case SYS_FORK: {
-      f->R.rax = fork((const char *)f->R.rdi, f);
-      break;
-    }
-    case SYS_EXEC: {
-      f->R.rax = exec((const char *)f->R.rdi);
-      break;
-    }
-    case SYS_WAIT: {
-      f->R.rax = wait((tid_t)f->R.rdi);
-      break;
-    }
-    case SYS_CREATE: {
-      f->R.rax = create((char *)f->R.rdi, f->R.rsi);
-      break;
-    }
-    case SYS_REMOVE: {
-      f->R.rax = remove((const char *)f->R.rdi);
-      break;
-    }
-    case SYS_OPEN: {
-      f->R.rax = open((const char *)f->R.rdi);
-      break;
-    }
-    case SYS_FILESIZE: {
-      f->R.rax = filesize((int)f->R.rdi);
-      break;
-    }
-    case SYS_READ: {
-      f->R.rax = read((int)f->R.rdi, (void *)f->R.rsi, (unsigned)f->R.rdx);
-      break;
-    }
-    case SYS_WRITE: {
-      f->R.rax = write((int)f->R.rdi, (void *)f->R.rsi, (unsigned)f->R.rdx);
-      break;
-    }
-    case SYS_SEEK: {
-      seek((int)f->R.rdi, (unsigned)f->R.rsi);
-      break;
-    }
-    case SYS_TELL: {
-      f->R.rax = tell((int)f->R.rdi);
-      break;
-    }
-    case SYS_CLOSE: {
-      close((int)f->R.rdi);
-      break;
-    }
-    case SYS_DUP2: {
-      f->R.rax = dup2((int)f->R.rdi, (int)f->R.rsi);
-      break;
-    }
-    default:
-      break;
-  }
-}
-
 /* Get freed file descriptor */
 static int allocate_fd() {
   struct thread *curr = thread_current();
@@ -357,4 +368,29 @@ static int allocate_fd() {
 static void free_fd(int fd) {
   ASSERT(is_valid_fd(fd))
   thread_current()->fdt[fd] = NULL;
+}
+
+static int64_t get_user(const uint8_t *uaddr) {
+  int64_t result;
+  __asm __volatile(
+      "movabsq $done_get, %0\n"
+      "movzbq %1, %0\n"
+      "done_get:\n"
+      : "=&a"(result)
+      : "m"(*uaddr));
+  return result;
+}
+
+/* Writes BYTE to user address UDST.
+ * UDST must be below KERN_BASE.
+ * Returns true if successful, false if a segfault occurred. */
+static bool put_user(uint8_t *udst, uint8_t byte) {
+  int64_t error_code;
+  __asm __volatile(
+      "movabsq $done_put, %0\n"
+      "movb %b2, %1\n"
+      "done_put:\n"
+      : "=&a"(error_code), "=m"(*udst)
+      : "q"(byte));
+  return error_code != -1;
 }

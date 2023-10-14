@@ -54,6 +54,7 @@ static bool uninit_initialize(struct page *page, void *kva) {
   void *aux = uninit->aux;
 
   /* TODO: You may need to fix this function. */
+  /* FIXME: install 실패 시 kva 반환. */
   return uninit->page_initializer(page, uninit->type, kva) &&
          (init ? init(page, aux) : true) && install_page(page);
 }
@@ -63,7 +64,9 @@ static bool uninit_initialize(struct page *page, void *kva) {
  * exit, which are never referenced during the execution.
  * PAGE will be freed by the caller. */
 static void uninit_destroy(struct page *page) {
-  struct uninit_page *uninit UNUSED = &page->uninit;
+  struct uninit_page *uninit = &page->uninit;
   /* TODO: Fill this function.
    * TODO: If you don't have anything to do, just return. */
+  free(uninit->aux);
+  return;
 }

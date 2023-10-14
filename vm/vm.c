@@ -108,7 +108,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
     return true;
   }
 err:
-  if(page) vm_dealloc_page(page);
+  if (page) vm_dealloc_page(page);
   return false;
 }
 
@@ -210,6 +210,8 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   void *upage = pg_round_down(addr);
   void *curr_rsp = (void *)f->rsp;
 
+  printf("🔥 fault addr: %p %p, rsp: %p\n", addr, pg_round_down(addr), curr_rsp);
+
   /* Validate stack overflow. */
   if (STACK_LIMIT < addr && addr < spt->stack_bottom) {
     /* If current stack is not full, not a stack overflow. */
@@ -296,7 +298,7 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt) {
   /* TODO: swap in/out or file-mapped by mmap - writeback. */
 
   /* SPT - writeback. */
-  if (&spt->hash) hash_destroy(&spt->hash, spt_free_page);
+  if (spt) hash_destroy(&spt->hash, spt_free_page);
   return;
 }
 
@@ -317,7 +319,7 @@ static bool spt_hash_less_func(const struct hash_elem *_a,
 /* SPT -  Hash action function: free page struct. */
 static void spt_free_page(struct hash_elem *e, void *aux UNUSED) {
   struct page *page = hash_entry(e, struct page, elem);
-  if (page) free(page);
+  if (page) vm_dealloc_page(page);
 }
 
 /* SPT - Hash action function: copy a single page. */
