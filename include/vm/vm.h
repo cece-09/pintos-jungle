@@ -105,6 +105,12 @@ struct swap_page_table {
 
 };
 
+/* file-mapped */
+struct file_info {
+  off_t ofs;
+  uint32_t bytes;
+};
+
 #include "threads/thread.h"
 void supplemental_page_table_init(struct supplemental_page_table *spt);
 bool supplemental_page_table_copy(struct supplemental_page_table *dst,

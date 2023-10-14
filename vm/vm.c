@@ -16,6 +16,7 @@ static uint64_t spt_hash_func(const struct hash_elem *, void *);
 static bool spt_hash_less_func(const struct hash_elem *,
                                const struct hash_elem *, void *);
 static void spt_free_page(struct hash_elem *, void *);
+static void spt_copy_page(struct hash_elem *, void *);
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -75,6 +76,9 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 
   struct supplemental_page_table *spt = &thread_current()->spt;
   struct page *page = calloc(1, sizeof(struct page));
+
+
+
 
   /* Check wheter the upage is already occupied or not. */
   if (spt_find_page(spt, upage) == NULL) {
@@ -205,6 +209,7 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
+  
   struct supplemental_page_table *spt = &thread_current()->spt;
   void *upage = pg_round_down(addr);
   void *curr_rsp = (void *)f->rsp;
@@ -275,27 +280,6 @@ void supplemental_page_table_init(struct supplemental_page_table *spt) {
   return;
 }
 
-static void spt_copy_page(struct hash_elem *e, void *aux) {
-  struct hash *dsc_hash = (struct hash *)aux;
-  struct page *src_page = hash_entry(e, struct page, elem);
-
-  /* Copy spt entries. */
-  struct page *dsc_page = calloc(1, sizeof(struct page));
-  memcpy(dsc_page, src_page, sizeof(struct page));
-  hash_insert(dsc_hash, &dsc_page->elem);
-
-  /* Claim page if need. */
-  if (pg_present(dsc_page)) {
-    struct frame* dsc_frame = vm_get_frame();
-    ASSERT(src_page->frame->kva)
-    ASSERT(dsc_page->frame->kva)
-
-    dsc_page->frame = dsc_frame;
-    dsc_frame->page = dsc_page;
-    memcpy(dsc_page->frame->kva, src_page->frame->kva, PGSIZE);
-    install_page(dsc_page);
-  }
-}
 
 /* SPT - Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy(struct supplemental_page_table *dsc,
@@ -304,7 +288,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dsc,
   dsc->stack_bottom  = src->stack_bottom;
 
   /* Copy hash table. */
-  src->hash.aux = &dsc->hash;
+  src->hash.aux = dsc;
   hash_apply(&src->hash, spt_copy_page);
   src->hash.aux = NULL;
   return true;
@@ -317,15 +301,17 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt) {
   /* TODO: swap in/out or file-mapped by mmap - writeback. */
 
   /* SPT - writeback. */
-  if (spt) hash_destroy(&spt->hash, spt_free_page);
+  if (&spt->hash) hash_destroy(&spt->hash, spt_free_page);
   return;
 }
 
+/* SPT - Hash hash function: use hash bytes. */
 static uint64_t spt_hash_func(const struct hash_elem *e, void *aux UNUSED) {
   struct page *page = hash_entry(e, struct page, elem);
   return hash_bytes(&page->va, sizeof(page->va));
 }
 
+/* SPT - Hash less function: according to va. */
 static bool spt_hash_less_func(const struct hash_elem *_a,
                                const struct hash_elem *_b, void *aux UNUSED) {
   struct page *a = hash_entry(_a, struct page, elem);
@@ -333,7 +319,42 @@ static bool spt_hash_less_func(const struct hash_elem *_a,
   return (uint64_t)a->va < (uint64_t)b->va;
 }
 
+/* SPT -  Hash action function: free page struct. */
 static void spt_free_page(struct hash_elem *e, void *aux UNUSED) {
   struct page *page = hash_entry(e, struct page, elem);
   if (page) free(page);
+}
+
+/* SPT - Hash action function: copy a single page. */
+static void spt_copy_page(struct hash_elem *e, void *aux) {
+  struct supplemental_page_table *dsc_spt = (struct supplemental_page_table *)aux;
+  struct hash *dsc_hash = &dsc_spt->hash;
+  struct page *src_page = hash_entry(e, struct page, elem);
+
+  /* Copy spt entries. */
+  struct page *dsc_page = calloc(1, sizeof(struct page));
+  memcpy(dsc_page, src_page, sizeof(struct page));
+  hash_insert(dsc_hash, &dsc_page->elem);
+
+  /* If uninitialized segement page, copy file info. */
+  struct file_info* dsc_aux;
+  struct file_info* src_aux = (struct file_info*)src_page->uninit.aux;
+  if(src_page->va < dsc_spt->stack_bottom && !src_page->frame) {
+    dsc_aux = calloc(1, sizeof(struct file_info));
+    dsc_aux->ofs = src_aux->ofs;
+    dsc_aux->bytes = src_aux->bytes;
+    dsc_page->uninit.aux = dsc_aux;
+  }
+
+  /* Claim page if present. */
+  if (pg_present(dsc_page)) {
+    struct frame* dsc_frame = vm_get_frame();
+    ASSERT(src_page->frame->kva)
+    ASSERT(dsc_page->frame->kva)
+
+    dsc_page->frame = dsc_frame;
+    dsc_frame->page = dsc_page;
+    memcpy(dsc_page->frame->kva, src_page->frame->kva, PGSIZE);
+    install_page(dsc_page);
+  }
 }

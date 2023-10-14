@@ -191,6 +191,9 @@ static void __do_fork(void *aux) {
   /* Activate current process. */
   process_activate(curr);
 
+  /* Duplicate exec file. */
+  curr->exec_file = file_duplicate(parent->exec_file);
+
 #ifdef VM
   supplemental_page_table_init(&curr->spt);
   if (!supplemental_page_table_copy(&curr->spt, &parent->spt)) goto error;
@@ -808,12 +811,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
  * If you want to implement the function for only project 2, implement it on
  * the upper block. */
 
-/* file-mapped */
-static struct file_info {
-  off_t ofs;
-  uint32_t bytes;
-  struct file *file; /* file */
-};
+
 
 /* SPT - Load the segment from the file.
  * This called when the first page fault occurs on address VA.
@@ -832,7 +830,7 @@ static bool lazy_load_segment(struct page *page, void *aux) {
 
   /* File information to read. */
   struct file_info *file_info = (struct file_info *)aux;
-  struct file *file = file_info->file;
+  struct file *file = curr->exec_file;
   uint32_t bytes = file_info->bytes;
   off_t ofs = file_info->ofs;
   bool writable = pg_writable(page);
@@ -881,7 +879,6 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 
     /* SPT - Set up aux to pass information to the lazy_load_segment. */
     struct file_info *aux = calloc(1, sizeof(struct file_info));
-    aux->file = file;
     aux->ofs = read_start;
     aux->bytes = page_read_bytes;
 
