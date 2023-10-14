@@ -151,7 +151,7 @@ make -j
 cd build
 source ../../activate
 
-$ARGS_NONE
+$FORK_ONCE
 # $PT_WRITE_CODE
 # $PT_WRITE_CODE
 # pintos -v -k  -m 20  --fs-disk=10 -p tests/userprog/args-multiple:args-multiple --swap-disk=4 -- -q   -f run 'args-multiple some arguments for you!'

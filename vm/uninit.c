@@ -55,7 +55,7 @@ static bool uninit_initialize(struct page *page, void *kva) {
 
   /* TODO: You may need to fix this function. */
   return uninit->page_initializer(page, uninit->type, kva) &&
-         (init ? init(page, aux) : true);
+         (init ? init(page, aux) : true) && install_page(page);
 }
 
 /* Free the resources hold by uninit_page. Although most of pages are transmuted

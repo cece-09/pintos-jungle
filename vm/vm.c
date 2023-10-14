@@ -2,6 +2,7 @@
 #include "vm/vm.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "threads/malloc.h"
 #include "threads/mmu.h"
@@ -47,10 +48,9 @@ enum vm_type page_get_type(struct page *page) {
 static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
-static bool install_page(struct page *page);
 
 /* Install page in current thread's pml4. */
-static bool install_page(struct page *page) {
+bool install_page(struct page *page) {
   struct thread *curr = thread_current();
   bool writable = pg_writable(page);
   void *kva = page->frame->kva;
@@ -61,7 +61,7 @@ static bool install_page(struct page *page) {
     printf("evict the page?\n");
     return false;
   }
-  return pml4_set_page(curr->pml4, page->va, kva, true);
+  return pml4_set_page(curr->pml4, page->va, kva, writable);
 }
 
 /* Create the pending page object with initializer. If you want to create a
@@ -100,8 +100,8 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
     }
 
     /* If stack page, claim immediately. */
-    if (upage == spt->stack_bottom && vm_do_claim_page(page)) {
-      return install_page(page);
+    if (upage == spt->stack_bottom) {
+      return vm_do_claim_page(page);
     }
     return true;
   }
@@ -209,8 +209,6 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   void *upage = pg_round_down(addr);
   void *curr_rsp = (void *)f->rsp;
 
-  printf("🥑 fault addr: %p\n", upage);
-
   /* Validate stack overflow. */
   if (STACK_LIMIT < addr && addr < spt->stack_bottom) {
     /* If current stack is not full, not a stack overflow. */
@@ -229,7 +227,6 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   if (write && !pg_writable(page)) {
     return false;
   }
-  printf("💜 spt: upage: %p, writable: %d\n", upage, pg_writable(page));
 
   /* Else, lazy loading. */
   return vm_do_claim_page(page);
@@ -289,13 +286,24 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
 
   /* Claim page if need. */
   if (pg_present(dsc_page)) {
-        install_page(dsc_page);
+    struct frame* dsc_frame = vm_get_frame();
+    ASSERT(src_page->frame->kva)
+    ASSERT(dsc_page->frame->kva)
+
+    dsc_page->frame = dsc_frame;
+    dsc_frame->page = dsc_page;
+    memcpy(dsc_page->frame->kva, src_page->frame->kva, PGSIZE);
+    install_page(dsc_page);
   }
 }
 
 /* SPT - Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy(struct supplemental_page_table *dsc,
                                   struct supplemental_page_table *src) {
+  /* Copy stack bottom. */
+  dsc->stack_bottom  = src->stack_bottom;
+
+  /* Copy hash table. */
   src->hash.aux = &dsc->hash;
   hash_apply(&src->hash, spt_copy_page);
   src->hash.aux = NULL;
