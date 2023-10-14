@@ -75,10 +75,11 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
   ASSERT(((uint64_t)upage % PGSIZE) == 0)
 
   struct supplemental_page_table *spt = &thread_current()->spt;
-  struct page *page = calloc(1, sizeof(struct page));
+  struct page *page = NULL;
 
   /* Check wheter the upage is already occupied or not. */
   if (spt_find_page(spt, upage) == NULL) {
+    page = calloc(1, sizeof(struct page));
     /* If upage is not a stack. */
     switch (type) {
       case VM_ANON:
@@ -102,11 +103,12 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 
     /* If stack page, claim immediately. */
     if (upage == spt->stack_bottom) {
-      return vm_do_claim_page(page);
+      if (!vm_do_claim_page(page)) goto err;
     }
     return true;
   }
 err:
+  if(page) vm_dealloc_page(page);
   return false;
 }
 
