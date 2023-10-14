@@ -242,6 +242,12 @@ int process_exec(void *f_name) {
   /* We first kill the current context */
   process_cleanup();
 
+  /* Close exec file. */
+  if (curr->exec_file) {
+    file_close(curr->exec_file);
+    curr->exec_file = NULL;
+  }
+
   /* Create new spt. */
   supplemental_page_table_init(&curr->spt);
 
@@ -304,6 +310,7 @@ void process_exit(void) {
   /* Close exec_file. */
   if (curr->exec_file) {
     file_close(curr->exec_file);
+    curr->exec_file = NULL;
   }
 
   /* If current is user process, */
@@ -809,8 +816,6 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on
  * the upper block. */
-
-
 
 /* SPT - Load the segment from the file.
  * This called when the first page fault occurs on address VA.

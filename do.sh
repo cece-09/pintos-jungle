@@ -147,7 +147,7 @@ COW_SIMPLE="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/cow/cow-simple:c
 
 cd vm
 make clean
-make -j
+make
 cd build
 source ../../activate
 

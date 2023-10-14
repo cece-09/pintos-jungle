@@ -9,3 +9,5 @@
 *.s
 test3.c
 .gdb_history
+do.sh
+chk.sh
