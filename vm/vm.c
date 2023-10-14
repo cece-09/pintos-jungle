@@ -55,14 +55,18 @@ bool install_page(struct page *page) {
   struct thread *curr = thread_current();
   bool writable = pg_writable(page);
   void *kva = page->frame->kva;
+  ASSERT(page && kva)
 
-  ASSERT(kva)
+  bool success = false;
 
   if (pml4_get_page(curr->pml4, page->va) != NULL) {
     printf("evict the page?\n");
     return false;
   }
-  return pml4_set_page(curr->pml4, page->va, kva, writable);
+  if(!pml4_set_page(curr->pml4, page->va, kva, writable)) {
+    return false;
+  }
+  return true;
 }
 
 /* Create the pending page object with initializer. If you want to create a
@@ -209,8 +213,6 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   struct supplemental_page_table *spt = &thread_current()->spt;
   void *upage = pg_round_down(addr);
   void *curr_rsp = (void *)f->rsp;
-
-  printf("🔥 fault addr: %p %p, rsp: %p\n", addr, pg_round_down(addr), curr_rsp);
 
   /* Validate stack overflow. */
   if (STACK_LIMIT < addr && addr < spt->stack_bottom) {

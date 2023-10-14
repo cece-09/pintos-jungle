@@ -248,9 +248,10 @@ int process_exec(void *f_name) {
     curr->exec_file = NULL;
   }
 
+#ifdef VM
   /* Create new spt. */
   supplemental_page_table_init(&curr->spt);
-
+#endif
   /* And then load the binary */
   success = load(file_name, &_if);
 
@@ -844,7 +845,7 @@ static bool lazy_load_segment(struct page *page, void *aux) {
     printf("process.c:838 File is not read properly.\n");
     return false;
   }
-
+  
   /* Free file info. */
   free(file_info);
   return true;

@@ -7,11 +7,11 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "intrinsic.h"
-#include "threads/mmu.h"
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/loader.h"
+#include "threads/mmu.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
@@ -65,9 +65,14 @@ void syscall_init(void) {
             FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
-static bool pg_no_write(void *va) {
+/* Returns if present page is writable.
+ * Returns false if page is not present. */
+static bool pg_write_protect(void *va) {
   struct thread *curr = thread_current();
-  uint64_t *pte = pml4e_walk(curr->pml4, (uint64_t)va, 0);
+  uint64_t *pte = pml4e_walk(curr->pml4, pg_round_down(va), 0);
+
+  /* If page is not in pml4, return false. */
+  if (*pte == NULL) return false;
   return !is_writable(pte);
 }
 
@@ -210,11 +215,9 @@ void close(int fd) {
 
 /* Read from file to buffer. */
 int read(int fd, void *buffer, unsigned size) {
+  /* If page is write-protect, exit. */
+  if (pg_write_protect(buffer)) exit(-1);
 
-  // FIXME: write bit가 0인 페이지에 접근하면 접근 막아야함. (code-write2)
-  if (pg_no_write(buffer)) {
-    exit(-1);
-  }
   if (!is_valid_fd(fd)) return 0;
   struct file **fdt = thread_current()->fdt;
 
@@ -385,6 +388,7 @@ static int64_t get_user(const uint8_t *uaddr) {
  * UDST must be below KERN_BASE.
  * Returns true if successful, false if a segfault occurred. */
 static bool put_user(uint8_t *udst, uint8_t byte) {
+  printf("🩵 addr: %p\n", udst);
   int64_t error_code;
   __asm __volatile(
       "movabsq $done_put, %0\n"
