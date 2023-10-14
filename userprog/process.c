@@ -196,7 +196,6 @@ static void __do_fork(void *aux) {
   if (!supplemental_page_table_copy(&curr->spt, &parent->spt)) goto error;
 #else
   if (!pml4_for_each(parent->pml4, duplicate_pte, parent)) goto error;
-
 #endif
 
   /* Get new page for fdt. */
@@ -822,13 +821,13 @@ static struct file_info {
 static bool lazy_load_segment(struct page *page, void *aux) {
   struct thread *curr = thread_current();
   void *upage = page->va;
-  bool succ = false;
 
   /* Get a page of memory. */
   struct frame *frame = page->frame;
   void *kva = frame->kva;
   if (frame == NULL || kva == NULL) {
-    PANIC("process.c:827 No frame is allocated.\n");
+    printf("process.c:827 No frame is allocated.\n");
+    return false;
   }
 
   /* File information to read. */
@@ -841,19 +840,13 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   /* Load this page. */
   file_seek(file, ofs);
   if (file_read(file, kva, bytes) != (int)bytes) {
-    PANIC("process.c:838 File is not read properly.\n");
-  }
-
-  /* Set page in current thread's pml4. */
-  if (pml4_get_page(curr->pml4, page->va) != NULL) {
-    printf("evict the page?\n");
-  } else {
-    succ = pml4_set_page(curr->pml4, page->va, kva, writable);
+    printf("process.c:838 File is not read properly.\n");
+    return false;
   }
 
   /* Free file info. */
   free(file_info);
-  return succ;
+  return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
