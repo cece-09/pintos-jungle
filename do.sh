@@ -147,10 +147,10 @@ COW_SIMPLE="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/cow/cow-simple:c
 
 cd vm
 make clean
-make
+make -j
 cd build
 source ../../activate
 
-$PAGE_MERGE_STK
+$MMAP_READ
 # $READ_BOUNDAR
 

@@ -10,8 +10,6 @@
 #include "threads/vaddr.h"
 #include "vm/inspect.h"
 
-#define STACK_LIMIT (USER_STACK - (1 << 20))
-
 static uint64_t spt_hash_func(const struct hash_elem *, void *);
 static bool spt_hash_less_func(const struct hash_elem *,
                                const struct hash_elem *, void *);
@@ -222,15 +220,20 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
     return vm_stack_growth(upage);
   }
 
+  printf("@@ fault: %p, try to %s\n", addr, write ? "write" : "read");
+
   /* Else, search for page in spt. */
   struct page *page = spt_find_page(spt, addr);
   if (page == NULL) {
+    printf("@@ page not found.\n");
     return false;
   }
+
 
   /* If page is unwritable, return false. */
   if (write && !pg_writable(page)) {
     /* TODO: handle copy-on-write. */
+    printf("@@ try to access write protect page\n");
     return false;
   }
 
@@ -264,6 +267,8 @@ static bool vm_do_claim_page(struct page *page) {
 
   /* Mark as present */
   page->flags = page->flags | PTE_P;
+
+  printf("@@ do claim: %p %d\n", frame->kva, type);
 
   /* Initialize page */
   return swap_in(page, frame->kva);

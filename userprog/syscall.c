@@ -17,6 +17,7 @@
 #include "threads/thread.h"
 #include "userprog/gdt.h"
 #include "userprog/process.h"
+#include "vm/vm.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -52,6 +53,7 @@ int exec(const char *);
 bool remove(const char *);
 void seek(int, unsigned);
 unsigned tell(int);
+void* mmap(void*, size_t, int, int, off_t);
 
 void syscall_init(void) {
   write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 | ((uint64_t)SEL_KCSEG)
@@ -142,9 +144,26 @@ void syscall_handler(struct intr_frame *f) {
       f->R.rax = dup2((int)f->R.rdi, (int)f->R.rsi);
       break;
     }
+    case SYS_MMAP: {
+      f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+      break;
+    }
     default:
       break;
   }
+}
+
+/* Memory mapping. */
+void* mmap(void* addr, size_t length, int writable, int fd, off_t offset) {
+  if (!is_valid_fd(fd)) return NULL;
+
+  struct file** fdt = thread_current()->fdt;
+  struct file* file = fdt[fd];
+  if(is_file_std(file)) return NULL;
+
+  if(length <= 0) return NULL;
+
+  return do_mmap(addr, length, writable, file, offset); 
 }
 
 /* Power off system. */

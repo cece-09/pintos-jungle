@@ -5,6 +5,11 @@
 #include <stdbool.h>
 
 #include "threads/palloc.h"
+#include "threads/mmu.h"
+#include "threads/pte.h"
+#include "threads/malloc.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
 
 enum vm_type {
   /* page not initialized */
@@ -42,6 +47,9 @@ struct thread;
 /* Check page flag bits. */
 #define pg_writable(page) ((page->flags & PTE_W ) != 0)
 #define pg_present(page) ((page->flags & PTE_P ) != 0)
+
+/* Absolute stack limit. */
+#define STACK_LIMIT (USER_STACK - (1 << 20))
 
 /* The representation of "page".
  * This is kind of "parent class", which has four "child class"es, which are
@@ -107,6 +115,7 @@ struct swap_page_table {
 
 /* Exec file info for loading segment. */
 struct file_info {
+  struct file* file;
   off_t ofs;
   size_t bytes;
 };

@@ -1,4 +1,4 @@
 source activate
 cd vm
 make clean
-make check
+make -j check
