@@ -71,7 +71,7 @@ static bool mmap_init(struct page* page, void* aux) {
 	void* kva = page->frame->kva;
 	
     file_seek(file, ofs);
-	if(file_read(file, kva, bytes) != (int)bytes) {
+	if(file_read(file, kva, bytes) == (int)bytes) {
 		printf("@@ fail to read file.\n");
 		return false;
 	}
@@ -84,7 +84,7 @@ do_mmap (void *addr, size_t length, int writable,
 		struct file *file, off_t offset) {
 	struct thread* curr = thread_current();
 
-	printf("## mmap request: %p, size: %d, file: %p\n", addr, length, file);
+	// printf("## mmap request: %p, size: %d, file: %p\n", addr, length, file);
 	
 	/* If addr is null or not page-aligned. */
 	if(addr == NULL || (uint64_t)addr % PGSIZE) return NULL;
@@ -127,5 +127,5 @@ do_mmap (void *addr, size_t length, int writable,
 /* Do the munmap */
 void
 do_munmap (void *addr) {
-	
+
 }

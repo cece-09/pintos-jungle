@@ -58,7 +58,7 @@ bool install_page(struct page *page) {
   bool success = false;
 
   if (pml4_get_page(curr->pml4, page->va) != NULL) {
-    printf("evict the page?\n");
+    // printf("evict the page?\n");
     return false;
   }
   if(!pml4_set_page(curr->pml4, page->va, kva, writable)) {
@@ -99,7 +99,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 
     /* Insert page into spt. */
     if (!spt_insert_page(spt, page)) {
-      printf("vm.c:75 spt insert failed\n");
+      // printf("vm.c:75 spt insert failed\n");
       goto err;
     }
 
@@ -173,7 +173,7 @@ static struct frame *vm_get_frame(void) {
   struct frame *frame = NULL;
   frame = calloc(1, sizeof(struct frame));
   if (frame == NULL) {
-    printf("Frame allocation failed.\n");
+    // printf("Frame allocation failed.\n");
     return NULL;
   }
 
@@ -181,7 +181,7 @@ static struct frame *vm_get_frame(void) {
   frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
   if (frame->kva == NULL) {
     free(frame);
-    printf("Memory is full.\n");
+    // printf("Memory is full.\n");
     return NULL;
   }
 
@@ -220,12 +220,12 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
     return vm_stack_growth(upage);
   }
 
-  printf("@@ fault: %p, try to %s\n", addr, write ? "write" : "read");
+  // printf("@@ fault: %p, try to %s\n", addr, write ? "write" : "read");
 
   /* Else, search for page in spt. */
   struct page *page = spt_find_page(spt, addr);
   if (page == NULL) {
-    printf("@@ page not found.\n");
+    // printf("@@ page not found.\n");
     return false;
   }
 
@@ -233,7 +233,7 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   /* If page is unwritable, return false. */
   if (write && !pg_writable(page)) {
     /* TODO: handle copy-on-write. */
-    printf("@@ try to access write protect page\n");
+    // printf("@@ try to access write protect page\n");
     return false;
   }
 
@@ -268,7 +268,7 @@ static bool vm_do_claim_page(struct page *page) {
   /* Mark as present */
   page->flags = page->flags | PTE_P;
 
-  printf("@@ do claim: %p %d\n", frame->kva, type);
+  // printf("@@ do claim: %p %d\n", frame->kva, type);
 
   /* Initialize page */
   return swap_in(page, frame->kva);
