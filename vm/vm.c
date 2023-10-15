@@ -99,7 +99,6 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 
     /* Insert page into spt. */
     if (!spt_insert_page(spt, page)) {
-      // printf("vm.c:75 spt insert failed\n");
       goto err;
     }
 
@@ -220,20 +219,15 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
     return vm_stack_growth(upage);
   }
 
-  // printf("@@ fault: %p, try to %s\n", addr, write ? "write" : "read");
-
   /* Else, search for page in spt. */
   struct page *page = spt_find_page(spt, addr);
   if (page == NULL) {
-    // printf("@@ page not found.\n");
     return false;
   }
-
 
   /* If page is unwritable, return false. */
   if (write && !pg_writable(page)) {
     /* TODO: handle copy-on-write. */
-    // printf("@@ try to access write protect page\n");
     return false;
   }
 
@@ -267,8 +261,6 @@ static bool vm_do_claim_page(struct page *page) {
 
   /* Mark as present */
   page->flags = page->flags | PTE_P;
-
-  // printf("@@ do claim: %p %d\n", frame->kva, type);
 
   /* Initialize page */
   return swap_in(page, frame->kva);

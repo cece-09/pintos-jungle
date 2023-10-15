@@ -25,10 +25,8 @@ bool
 file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 	/* File-backed info. */
 	struct file_info* aux = page->uninit.aux;
-	if(aux == NULL){
-		printf("@@ aux is null.\n");
-		 return false;
-	}
+	if(aux == NULL) return false;
+	
 
 	/* Set up the handler */
 	page->operations = &file_ops;
@@ -70,11 +68,9 @@ static bool mmap_init(struct page* page, void* aux) {
 	ASSERT(page->frame)
 	void* kva = page->frame->kva;
 	
+	/* Map with file. */
     file_seek(file, ofs);
-	if(file_read(file, kva, bytes) == (int)bytes) {
-		printf("@@ fail to read file.\n");
-		return false;
-	}
+	file_read(file, kva, bytes);
 	return true;
 }
 
@@ -83,43 +79,39 @@ void *
 do_mmap (void *addr, size_t length, int writable,
 		struct file *file, off_t offset) {
 	struct thread* curr = thread_current();
-
-	// printf("## mmap request: %p, size: %d, file: %p\n", addr, length, file);
 	
 	/* If addr is null or not page-aligned. */
 	if(addr == NULL || (uint64_t)addr % PGSIZE) return NULL;
-
 	
 	/* If addr is in spt. */
 	for(void* p = addr; p < addr + length; p += PGSIZE) {
-		if(spt_find_page(&curr->spt, p)) {
-			return NULL;
-		}
+		if(spt_find_page(&curr->spt, p)) return NULL;
 	}
 
 	/* If addr is above STACK_LIMIT. */
-	if(addr + length > STACK_LIMIT) {
-		return NULL;
-	}
+	if(addr + length > STACK_LIMIT) return NULL;
     
 	/* Allocate page with lazy loading. */
 	struct file* mmap_file = file_duplicate(file);
     size_t read_byte = length;
+	int page_cnt = 0;
+
 	while (read_byte > 0)
 	{
 		size_t page_read_byte = read_byte < PGSIZE ? read_byte : PGSIZE;
 
-		struct file_info* file_info = calloc(1, sizeof(struct file_info));
-		file_info->file = mmap_file;
-		file_info->ofs = offset;
-		file_info->bytes = page_read_byte;
+		struct file_info* aux = calloc(1, sizeof(struct file_info));
+		aux->file = mmap_file;
+		aux->ofs = offset;
+		aux->bytes = page_read_byte;
 
-		if(!vm_alloc_page_with_initializer(VM_FILE, addr, writable, mmap_init, file_info)) {
-			return false;
+		if(!vm_alloc_page_with_initializer(VM_FILE, addr+(page_cnt*PGSIZE), writable, mmap_init, aux)) {
+			return NULL;
 		}
 
 		offset += page_read_byte;
 		read_byte -= page_read_byte;
+		page_cnt ++;
 	}
 	return addr;
 }
@@ -127,5 +119,12 @@ do_mmap (void *addr, size_t length, int writable,
 /* Do the munmap */
 void
 do_munmap (void *addr) {
+	struct thread* curr = thread_current();
+	struct page* page = spt_find_page(&curr->spt, addr);
 
+	spt_remove_page(&curr->spt, page);
+	pml4_clear_page(curr->pml4, addr);
+
+	// FIXME: dealloc page.
+	vm_dealloc_page(page);
 }

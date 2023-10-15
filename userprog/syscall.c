@@ -148,9 +148,19 @@ void syscall_handler(struct intr_frame *f) {
       f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
       break;
     }
+    case SYS_MUNMAP : {
+      munmap(f->R.rdi);
+      break;
+    }
     default:
       break;
   }
+}
+
+/* Unmap memmory. */
+void munmap(void* addr) {
+  if(addr == NULL) return NULL;
+  do_munmap(addr);
 }
 
 /* Memory mapping. */
@@ -393,30 +403,4 @@ static int allocate_fd() {
 static void free_fd(int fd) {
   ASSERT(is_valid_fd(fd))
   thread_current()->fdt[fd] = NULL;
-}
-
-static int64_t get_user(const uint8_t *uaddr) {
-  int64_t result;
-  __asm __volatile(
-      "movabsq $done_get, %0\n"
-      "movzbq %1, %0\n"
-      "done_get:\n"
-      : "=&a"(result)
-      : "m"(*uaddr));
-  return result;
-}
-
-/* Writes BYTE to user address UDST.
- * UDST must be below KERN_BASE.
- * Returns true if successful, false if a segfault occurred. */
-static bool put_user(uint8_t *udst, uint8_t byte) {
-  printf("🩵 addr: %p\n", udst);
-  int64_t error_code;
-  __asm __volatile(
-      "movabsq $done_put, %0\n"
-      "movb %b2, %1\n"
-      "done_put:\n"
-      : "=&a"(error_code), "=m"(*udst)
-      : "q"(byte));
-  return error_code != -1;
 }
