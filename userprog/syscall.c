@@ -69,7 +69,7 @@ void syscall_init(void) {
  * Returns false if page is not present. */
 static bool pg_write_protect(void *va, size_t size) {
   struct thread *curr = thread_current();
-
+  /* from va to va + size. */
   for (void *p = va; p < va + size; p += PGSIZE) {
     uint64_t *pte = pml4e_walk(curr->pml4, pg_round_down(p), 0);
     if (*pte != NULL && !is_writable(pte)) {
