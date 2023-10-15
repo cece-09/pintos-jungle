@@ -151,6 +151,6 @@ make
 cd build
 source ../../activate
 
-$PAGE_MERGE_PAR
+$PAGE_MERGE_STK
 # $READ_BOUNDAR
 

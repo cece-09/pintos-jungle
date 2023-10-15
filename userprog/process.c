@@ -254,10 +254,7 @@ int process_exec(void *f_name) {
 #endif
 
   /* And then load the binary */
-  sema_down(&exec_sema);
-  printf("🩵 thread %d load exec file.\n", thread_current()->tid);
   success = load(file_name, &_if);
-  sema_up(&exec_sema);
 
   /* If load failed, quit. */
   palloc_free_page(file_name);
@@ -546,13 +543,12 @@ static bool load(const char *file_name, struct intr_frame *if_) {
   process_activate(thread_current());
 
   /* Open executable file. */
-//   sema_down(&exec_sema);
+  sema_down(&exec_sema);
   file = filesys_open(file_name);
-//   sema_up(&exec_sema);
+  sema_up(&exec_sema);
 
   if (file == NULL) {
-    printf("💛 thread %d open %s failed.\n", thread_current()->tid, file_name);
-    // printf("load: %s: open failed\n", file_name);
+    printf("load: %s: open failed\n", file_name);
     goto done;
   }
 

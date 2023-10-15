@@ -84,17 +84,9 @@ filesys_open (const char *name) {
 	struct dir *dir = dir_open_root ();
 	struct inode *inode = NULL;
 
-	if (dir != NULL) {
-
-		if(!dir_lookup (dir, name, &inode)) {
-            printf("🥑 dir_lookup fail.\n");
-        }
-    }
+	if (dir != NULL) 
+        dir_lookup (dir, name, &inode);
 	dir_close (dir);
-
-    if(inode == NULL) {
-        printf("🩷 thread %d: inode is NULL\n", thread_current()->tid);
-    }
 
 	return file_open (inode);
 }

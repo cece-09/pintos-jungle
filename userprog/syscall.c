@@ -317,7 +317,6 @@ int wait(tid_t tid) {
 
 /* Execute process. */
 int exec(const char *cmd_line) {
-  printf("💚 thread %d try to exec : %s\n", thread_current()->tid, cmd_line);
   const char *fn_copy = palloc_get_page(0);
   strlcpy(fn_copy, cmd_line, strlen(cmd_line) + 1);
   int success = process_exec(fn_copy);
