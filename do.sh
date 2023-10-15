@@ -151,6 +151,6 @@ make
 cd build
 source ../../activate
 
-$PT_WRITE_CODE2
+$PAGE_MERGE_PAR
 # $READ_BOUNDAR
 

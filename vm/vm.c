@@ -230,6 +230,7 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
 
   /* If page is unwritable, return false. */
   if (write && !pg_writable(page)) {
+    /* TODO: handle copy-on-write. */
     return false;
   }
 
@@ -348,6 +349,7 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
 
   /* Claim page if present. */
   if (pg_present(dsc_page)) {
+    // TODO: handle copy-on-write.
     struct frame *dsc_frame = vm_get_frame();
     ASSERT(src_page->frame->kva)
     ASSERT(dsc_page->frame->kva)
@@ -355,6 +357,7 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
     dsc_page->frame = dsc_frame;
     dsc_frame->page = dsc_page;
     memcpy(dsc_page->frame->kva, src_page->frame->kva, PGSIZE);
+
     install_page(dsc_page);
   }
 }

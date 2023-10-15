@@ -67,13 +67,16 @@ void syscall_init(void) {
 
 /* Returns if present page is writable.
  * Returns false if page is not present. */
-static bool pg_write_protect(void *va) {
+static bool pg_write_protect(void *va, size_t size) {
   struct thread *curr = thread_current();
-  uint64_t *pte = pml4e_walk(curr->pml4, pg_round_down(va), 0);
 
-  /* If page is not in pml4, return false. */
-  if (*pte == NULL) return false;
-  return !is_writable(pte);
+  for (void *p = va; p < va + size; p += PGSIZE) {
+    uint64_t *pte = pml4e_walk(curr->pml4, pg_round_down(p), 0);
+    if (*pte != NULL && !is_writable(pte)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /* The main system call interface */
@@ -216,7 +219,7 @@ void close(int fd) {
 /* Read from file to buffer. */
 int read(int fd, void *buffer, unsigned size) {
   /* If page is write-protect, exit. */
-  if (pg_write_protect(buffer)) exit(-1);
+  if (pg_write_protect(buffer, size)) exit(-1);
 
   if (!is_valid_fd(fd)) return 0;
   struct file **fdt = thread_current()->fdt;
@@ -314,6 +317,7 @@ int wait(tid_t tid) {
 
 /* Execute process. */
 int exec(const char *cmd_line) {
+  printf("💚 thread %d try to exec : %s\n", thread_current()->tid, cmd_line);
   const char *fn_copy = palloc_get_page(0);
   strlcpy(fn_copy, cmd_line, strlen(cmd_line) + 1);
   int success = process_exec(fn_copy);

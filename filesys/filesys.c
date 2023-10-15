@@ -8,6 +8,8 @@
 #include "filesys/directory.h"
 #include "devices/disk.h"
 
+#include "threads/thread.h"
+
 /* The disk that contains the file system. */
 struct disk *filesys_disk;
 
@@ -82,9 +84,17 @@ filesys_open (const char *name) {
 	struct dir *dir = dir_open_root ();
 	struct inode *inode = NULL;
 
-	if (dir != NULL)
-		dir_lookup (dir, name, &inode);
+	if (dir != NULL) {
+
+		if(!dir_lookup (dir, name, &inode)) {
+            printf("🥑 dir_lookup fail.\n");
+        }
+    }
 	dir_close (dir);
+
+    if(inode == NULL) {
+        printf("🩷 thread %d: inode is NULL\n", thread_current()->tid);
+    }
 
 	return file_open (inode);
 }

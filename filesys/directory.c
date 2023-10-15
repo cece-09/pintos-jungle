@@ -94,6 +94,7 @@ lookup (const struct dir *dir, const char *name,
 				*ofsp = ofs;
 			return true;
 		}
+    printf("❗️ 파일 %s 못찾음.\n", name);
 	return false;
 }
 
