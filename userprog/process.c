@@ -822,6 +822,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 /* SPT - Load the segment from the file.
  * This called when the first page fault occurs on address VA.
  * VA is available when calling this function. */
+// TODO: mmap_init과 합치기
 static bool lazy_load_segment(struct page *page, void *aux) {
   struct thread *curr = thread_current();
   void *upage = page->va;
@@ -846,6 +847,8 @@ static bool lazy_load_segment(struct page *page, void *aux) {
     printf("process.c:838 File is not read properly.\n");
     return false;
   }
+
+  // TODO: 여기서 file-backed memory로 바꿔준다.
   
   /* Free file info. */
   free(file_info);
@@ -905,7 +908,8 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 static bool setup_stack(struct intr_frame *if_) {
   void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
   bool success = false;
-
+  
+  /* Since addr is stack bottom, vm_alloc_page claims page immediately. */
   if (vm_alloc_page(VM_ANON, stack_bottom, true)) {
     if_->rsp = USER_STACK;
     success = true;

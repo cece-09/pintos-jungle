@@ -61,7 +61,7 @@ bool install_page(struct page *page) {
     // printf("evict the page?\n");
     return false;
   }
-  if(!pml4_set_page(curr->pml4, page->va, kva, writable)) {
+  if (!pml4_set_page(curr->pml4, page->va, kva, writable)) {
     return false;
   }
   return true;
@@ -332,20 +332,20 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
   /* Copy spt entries. */
   struct page *dsc_page = calloc(1, sizeof(struct page));
   memcpy(dsc_page, src_page, sizeof(struct page));
+  /* Deconnect from parent's hash table. */
+  memset(&dsc_page->elem, 0, sizeof(struct hash_elem));
   hash_insert(dsc_hash, &dsc_page->elem);
 
-  /* If uninitialized segement page, copy file info. */
-  struct file_info *dsc_aux;
-  struct file_info *src_aux = (struct file_info *)src_page->uninit.aux;
-  if (dsc_page->va < dsc_spt->stack_bottom && !pg_present(dsc_page)) {
-    dsc_aux = calloc(1, sizeof(struct file_info));
-    dsc_aux->ofs = src_aux->ofs;
-    dsc_aux->bytes = src_aux->bytes;
-    dsc_page->uninit.aux = dsc_aux;
-  }
+  if (!pg_present(src_page)) {
+    /* If uninitialized segement page, copy file info. */
+    struct file_info *dsc_aux;
+    struct file_info *src_aux = (struct file_info *)src_page->uninit.aux;
 
-  /* Claim page if present. */
-  if (pg_present(dsc_page)) {
+    dsc_aux = calloc(1, sizeof(struct file_info));
+    memcpy(dsc_aux, src_aux, sizeof(struct file_info));
+    dsc_page->uninit.aux = dsc_aux;
+  } else {
+    /* Claim page if present. */
     // TODO: handle copy-on-write.
     struct frame *dsc_frame = vm_get_frame();
     ASSERT(src_page->frame->kva)

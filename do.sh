@@ -151,6 +151,6 @@ make
 cd build
 source ../../activate
 
-$MMAP_READ
+$FORK_RECURSIVE
 # $READ_BOUNDAR
 

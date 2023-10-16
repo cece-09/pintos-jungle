@@ -27,7 +27,6 @@ file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 	struct file_info* aux = page->uninit.aux;
 	if(aux == NULL) return false;
 	
-
 	/* Set up the handler */
 	page->operations = &file_ops;
 

@@ -427,9 +427,7 @@ void intr_handler(struct intr_frame *frame) {
      IF가 꺼져 있다) 또한 이 인터럽트는 PIC에서 인식되어야 합니다. 외부 인터럽트
      핸들러는 종료되지 않습니다. */
 
-  /*
-   ! 0x20은 timer interrupt, 0x30은 ? */
-  external = frame->vec_no >= 0x20 && frame->vec_no < 0x30;
+  external = (frame->vec_no >= 0x20 && frame->vec_no < 0x30);
   if (external) {
     ASSERT(intr_get_level() == INTR_OFF);  // 인터럽트 비활성화여야 함
     ASSERT(!intr_context());  // 인터럽트 처리 컨텍스트가 아니어야 함
@@ -439,9 +437,9 @@ void intr_handler(struct intr_frame *frame) {
   }
 
   /* Invoke the interrupt's handler. */
-  handler = intr_handlers[frame->vec_no];  // idt에서 찾아온다
-  if (handler != NULL)                     // 핸들러가 있으면
-    handler(frame);                        // 핸들러를 실행, thread_tick
+  handler = intr_handlers[frame->vec_no];
+  if (handler != NULL)                   
+    handler(frame);                      
   else if (frame->vec_no == 0x27 ||
            frame->vec_no == 0x2f) {  // 없고 벡터가 얘네이면 무시
     /* There is no handler, but this interrupt can trigger

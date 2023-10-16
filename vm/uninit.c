@@ -67,7 +67,6 @@ static void uninit_destroy(struct page *page) {
   struct uninit_page *uninit = &page->uninit;
   /* TODO: Fill this function.
    * TODO: If you don't have anything to do, just return. */
-  if(page->frame) free(page->frame);
   free(uninit->aux);
   return;
 }
