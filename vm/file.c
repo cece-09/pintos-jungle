@@ -7,7 +7,7 @@
 static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
-static void file_write_back(struct page *page, off_t offset, size_t bytes);
+static void file_write_back(struct page *page);
 static bool lazy_load_file(struct page *page, void *aux);
 
 /* DO NOT MODIFY this struct */
@@ -60,9 +60,7 @@ static void file_backed_destroy(struct page *page) {
   struct file_page *file_page = &page->file;
 
   /* Write back to file. */
-  off_t offset = page->va - page->file.map_addr;
-  size_t length = (length - offset) < PGSIZE ? (length - offset) : PGSIZE;
-  file_write_back(page, offset, length);
+  file_write_back(page);
 
   /* Clear up. */
   pml4_clear_page(curr->pml4, page->va);
@@ -128,7 +126,6 @@ void do_munmap(void *addr) {
   struct file *file = page->file.file;
   void *map_addr = page->file.map_addr;
   size_t length = page->file.length;
-  off_t offset = page->file.offset;
 
   /* If addr is valid mapped-address, */
   for (void *p = addr; length > 0; p += PGSIZE) {
@@ -144,7 +141,7 @@ void do_munmap(void *addr) {
     spt_remove_page(&curr->spt, page);
     length -= page_length;
   }
-  
+
   // TODO: delete.
   file_close(file);
 }
@@ -175,21 +172,24 @@ static bool lazy_load_file(struct page *page, void *aux) {
   if (kva == NULL) return false;
 
   /* Map with file. */
-  file_seek(file, offset);
-  if(file_read(file, kva, read_bytes) != (int) read_bytes) {
+  file_seek(file, read_start);
+  if (file_read(file, kva, read_bytes) != (int)read_bytes) {
     return false;
   }
   return true;
 }
 
 /* Write back to file. Called when unmap. */
-static void file_write_back(struct page *page, off_t offset, size_t bytes) {
+static void file_write_back(struct page *page) {
   struct thread *curr = thread_current();
-  struct file *file = page->file.file;
-  void *kva = page->frame->kva;
 
-  off_t write_bytes = file_length(file);
-  write_bytes = write_bytes < bytes ? write_bytes : bytes;
+  ASSERT(page->operations->type == VM_FILE)
+
+  struct file *file = page->file.file;
+  off_t offset = page->file.offset;
+  size_t length = page->file.length;
+  void *map_addr = page->file.map_addr;
+  void *kva = page->frame->kva;
 
   ASSERT(kva && file)
 
@@ -198,9 +198,21 @@ static void file_write_back(struct page *page, off_t offset, size_t bytes) {
     return;
   }
 
+  /* Calculate page offset. */
+  off_t page_offset = (page->va - map_addr) % PGSIZE;
+
+  /* Calculate read-start point. */
+  off_t write_start = offset + page_offset * PGSIZE;
+
+  /* Calculate read-bytes. */
+  off_t file_len = file_length(file);
+  size_t write_bytes = (offset + length) - write_start;
+  write_bytes = write_bytes < PGSIZE ? write_bytes : PGSIZE;
+  write_bytes = write_bytes < file_len ? write_bytes : file_len;
+
   /* Write back to file. */
-  file_seek(file, offset);
-  if(file_write(file, kva, write_bytes) != (int)write_bytes) {
+  file_seek(file, write_start);
+  if (file_write(file, kva, write_bytes) != (int)write_bytes) {
     PANIC("File write failed.");
   }
 }

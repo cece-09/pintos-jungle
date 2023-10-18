@@ -343,10 +343,8 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
     size_t aux_size;
     switch (page_get_type(src_page)) {
       case VM_ANON:
-        printf("🔥 copy anon page\n");
         aux_size = sizeof(struct file_info);
       case VM_FILE:
-        printf("🔥 copy file page\n");
         aux_size = sizeof(struct file_page);
     }
     dsc_aux = calloc(1, aux_size);
