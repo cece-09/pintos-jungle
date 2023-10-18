@@ -153,6 +153,4 @@ make
 cd build
 source ../../activate
 
-$MMAP_EXIT
-# $READ_BOUNDAR
-
+$MMAP_CLEAN

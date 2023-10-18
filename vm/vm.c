@@ -340,12 +340,17 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
     /* If uninitialized segement page, copy file info. */
     void *dsc_aux;
     void *src_aux = src_page->uninit.aux;
+    struct file_page* dsc_file_page;
     size_t aux_size;
     switch (page_get_type(src_page)) {
       case VM_ANON:
         aux_size = sizeof(struct file_info);
       case VM_FILE:
         aux_size = sizeof(struct file_page);
+        /* Use file dup to prevent double close. */
+        // FIXME: 부모와 자식이 동일한 파일 포인터를 갖는 식으로 spt_copy를 하고 있음
+        // struct file* file_dup = ((struct file_page*)src_aux)->file;
+        // file_dup->dup_cnt ++;
     }
     dsc_aux = calloc(1, aux_size);
     memcpy(dsc_aux, src_aux, aux_size);

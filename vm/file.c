@@ -66,8 +66,13 @@ static void file_backed_destroy(struct page *page) {
   pml4_clear_page(curr->pml4, page->va);
   palloc_free_page(page->frame->kva);
 
-  // TODO: Close file if needed.
-  // TODO: filesys_close();
+  /* Close file. */
+  // FIXME: 부모와 자식이 동일한 파일 포인터를 갖는 식으로 spt_copy를 하고 있음
+  if(file_page->file->dup_cnt > 0) {
+    file_page->file->dup_cnt--;
+  } else {
+    file_close(file_page->file);
+  }
   return;
 }
 
@@ -84,8 +89,8 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     if (spt_find_page(&curr->spt, p)) return NULL;
   }
 
-  /* If addr is above STACK_LIMIT. */
-  if (addr + length > STACK_LIMIT) return NULL;
+  /* If addr in stack area. */
+  if (addr + length > STACK_LIMIT && addr < USER_STACK) return NULL;
 
   /* Allocate page with lazy loading. */
   struct file *mmap_file = file_duplicate(file);
@@ -141,9 +146,6 @@ void do_munmap(void *addr) {
     spt_remove_page(&curr->spt, page);
     length -= page_length;
   }
-
-  // TODO: delete.
-  file_close(file);
 }
 
 /* Initialize file-backed frame. */
@@ -197,7 +199,8 @@ static void file_write_back(struct page *page) {
   if (!pml4_is_dirty(curr->pml4, page->va)) {
     return;
   }
-
+  
+  // TODO: lazy_load_file과 로직이 동일함. 수정할 것.
   /* Calculate page offset. */
   off_t page_offset = (page->va - map_addr) % PGSIZE;
 
