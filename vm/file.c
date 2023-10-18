@@ -9,6 +9,7 @@ static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
 static void file_write_back(struct page *page);
 static bool lazy_load_file(struct page *page, void *aux);
+static struct file *page_get_file(struct page *page);
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations file_ops = {
@@ -59,20 +60,26 @@ static void file_backed_destroy(struct page *page) {
   struct thread *curr = thread_current();
   struct file_page *file_page = &page->file;
 
-  /* Write back to file. */
-  file_write_back(page);
+  if (!is_file_head(page, &page->file)) return;
 
-  /* Clear up. */
-  pml4_clear_page(curr->pml4, page->va);
-  palloc_free_page(page->frame->kva);
+  /* Head page is already removed from hash table.
+   * Clean up sub-pages. */
+  void *p = page->va;
+
+  while (page) {
+    /* Write back to file. */
+    file_write_back(page);
+
+    /* Clear up. */
+    pml4_clear_page(curr->pml4, page->va);
+    palloc_free_page(page->frame->kva);
+
+    p += PGSIZE;
+    page = spt_find_page(&curr->spt, p);
+  }
 
   /* Close file. */
-  // FIXME: 부모와 자식이 동일한 파일 포인터를 갖는 식으로 spt_copy를 하고 있음
-  if(file_page->file->dup_cnt > 0) {
-    file_page->file->dup_cnt--;
-  } else {
-    file_close(file_page->file);
-  }
+  file_close(file_page->file);
   return;
 }
 
@@ -94,25 +101,27 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
 
   /* Allocate page with lazy loading. */
   struct file *mmap_file = file_duplicate(file);
-  int page_cnt = 0;
+  int cnt = 0;
 
   while (length > 0) {
     size_t page_length = length < PGSIZE ? length : PGSIZE;
 
     /* Save infos for initializing file-backed page. */
     struct file_page *aux = calloc(1, sizeof(struct file_page));
-    aux->file = mmap_file; /* map file from */
-    aux->offset = offset;  /* offset, */
-    aux->length = length;  /* to length bytes. */
-    aux->map_addr = addr;  /* map-start address. */
 
-    if (!vm_alloc_page_with_initializer(VM_FILE, addr + (page_cnt * PGSIZE),
+    /* Only head page holds mmap_file address. */
+    aux->file = cnt == 0 ? mmap_file : NULL; /* map file from */
+    aux->offset = offset;                    /* offset, */
+    aux->length = length;                    /* to length bytes. */
+    aux->map_addr = addr;                    /* map-start address. */
+
+    if (!vm_alloc_page_with_initializer(VM_FILE, addr + (cnt * PGSIZE),
                                         writable, lazy_load_file, aux)) {
       return NULL;
     }
 
     length -= page_length;
-    page_cnt++;
+    cnt++;
   }
   return addr;
 }
@@ -153,7 +162,7 @@ static bool lazy_load_file(struct page *page, void *aux) {
   ASSERT(page->operations->type == VM_FILE)
   ASSERT(page->frame)
 
-  struct file *file = page->file.file;
+  struct file *file = page_get_file(page);
   off_t offset = page->file.offset;
   size_t length = page->file.length;
   void *map_addr = page->file.map_addr;
@@ -183,11 +192,11 @@ static bool lazy_load_file(struct page *page, void *aux) {
 
 /* Write back to file. Called when unmap. */
 static void file_write_back(struct page *page) {
-  struct thread *curr = thread_current();
-
   ASSERT(page->operations->type == VM_FILE)
 
-  struct file *file = page->file.file;
+  struct thread *curr = thread_current();
+
+  struct file *file = page_get_file(page);
   off_t offset = page->file.offset;
   size_t length = page->file.length;
   void *map_addr = page->file.map_addr;
@@ -199,7 +208,7 @@ static void file_write_back(struct page *page) {
   if (!pml4_is_dirty(curr->pml4, page->va)) {
     return;
   }
-  
+
   // TODO: lazy_load_file과 로직이 동일함. 수정할 것.
   /* Calculate page offset. */
   off_t page_offset = (page->va - map_addr) % PGSIZE;
@@ -218,4 +227,20 @@ static void file_write_back(struct page *page) {
   if (file_write(file, kva, write_bytes) != (int)write_bytes) {
     PANIC("File write failed.");
   }
+}
+
+/* Get mapped-file from head page. */
+static struct file *page_get_file(struct page *page) {
+  ASSERT(page->operations->type == VM_FILE)
+  struct thread *curr = thread_current();
+
+  /* Get file address from head page. */
+  if (is_file_head(page, &page->file)) {
+    return page->file.file;
+  }
+
+  struct page *head_page;
+  head_page = spt_find_page(&curr->spt, page->file.map_addr);
+  ASSERT(head_page != NULL)
+  return head_page->file.file;
 }

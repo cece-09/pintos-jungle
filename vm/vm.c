@@ -143,6 +143,7 @@ bool spt_insert_page(struct supplemental_page_table *spt, struct page *page) {
 /* Remove page in spt. */
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page) {
   hash_delete(&spt->hash, &page->elem);
+
   vm_dealloc_page(page);
   return true;
 }
@@ -332,40 +333,53 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
   /* Copy spt entries. */
   struct page *dsc_page = calloc(1, sizeof(struct page));
   memcpy(dsc_page, src_page, sizeof(struct page));
+
   /* Deconnect from parent's hash table. */
   memset(&dsc_page->elem, 0, sizeof(struct hash_elem));
   hash_insert(dsc_hash, &dsc_page->elem);
 
-  if (!pg_present(src_page)) {
-    /* If uninitialized segement page, copy file info. */
-    void *dsc_aux;
-    void *src_aux = src_page->uninit.aux;
-    struct file_page* dsc_file_page;
-    size_t aux_size;
-    switch (page_get_type(src_page)) {
-      case VM_ANON:
-        aux_size = sizeof(struct file_info);
-      case VM_FILE:
-        aux_size = sizeof(struct file_page);
-        /* Use file dup to prevent double close. */
-        // FIXME: 부모와 자식이 동일한 파일 포인터를 갖는 식으로 spt_copy를 하고 있음
-        // struct file* file_dup = ((struct file_page*)src_aux)->file;
-        // file_dup->dup_cnt ++;
-    }
-    dsc_aux = calloc(1, aux_size);
-    memcpy(dsc_aux, src_aux, aux_size);
-    dsc_page->uninit.aux = dsc_aux;
-  } else {
-    /* Claim page if present. */
-    // TODO: handle copy-on-write.
-    struct frame *dsc_frame = vm_get_frame();
-    ASSERT(src_page->frame->kva)
-    ASSERT(dsc_page->frame->kva)
+  switch (page_get_type(src_page)) {
+    case VM_ANON:
+      /* Anon-uninitialized pages are segment pages. */
+      if (!pg_present(src_page)) {
+        struct file_info *src_aux = src_page->uninit.aux;
+        struct file_info *dsc_aux = calloc(1, sizeof(struct file_info));
+        memcpy(dsc_aux, src_aux, sizeof(struct file_info));
+        dsc_page->uninit.aux = dsc_aux;
+        return;
+      }
+      break;
+    case VM_FILE:
+      if (!pg_present(src_page)) {
+        struct file_page *src_aux = src_page->uninit.aux;
+        struct file_page *dsc_aux = calloc(1, sizeof(struct file_page));
+        memcpy(dsc_aux, src_aux, sizeof(struct file_page));
+        dsc_page->uninit.aux = dsc_aux;
 
-    dsc_page->frame = dsc_frame;
-    dsc_frame->page = dsc_page;
-    memcpy(dsc_page->frame->kva, src_page->frame->kva, PGSIZE);
+        /* If head page of file-backed pages, duplicate file. */
+        if (src_page->va == src_aux->map_addr) {
+          dsc_aux->file = file_duplicate(src_aux->file);
+        }
+        return;
+      }
 
-    install_page(dsc_page);
+      /* If head page of file-backed pages, duplicate file. */
+      if (is_file_head(src_page, &src_page->file)) {
+        dsc_page->file.file = file_duplicate(src_page->file.file);
+      }
+
+    default:
+      break;
   }
+  /* Claim page if present. */
+  // TODO: handle copy-on-write.
+  struct frame *dsc_frame = vm_get_frame();
+  ASSERT(src_page->frame->kva)
+  ASSERT(dsc_page->frame->kva)
+
+  dsc_page->frame = dsc_frame;
+  dsc_frame->page = dsc_page;
+  memcpy(dsc_page->frame->kva, src_page->frame->kva, PGSIZE);
+
+  install_page(dsc_page);
 }
