@@ -60,7 +60,7 @@ typedef int tid_t;
 
 /* File */
 #define is_file_std(ptr) (((int)ptr) < 0)
-#define is_valid_fd(int) ((int >= 0) && (int < MAX_FD))
+
 
 /* child process status */
 #define CHILD_BASE 0

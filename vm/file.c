@@ -68,7 +68,9 @@ static void file_backed_destroy(struct page *page) {
 
   while (page) {
     /* Write back to file. */
-    file_write_back(page);
+    if (pg_present(page)) {
+      file_write_back(page);
+    }
 
     /* Clear up. */
     pml4_clear_page(curr->pml4, page->va);
@@ -86,10 +88,11 @@ static void file_backed_destroy(struct page *page) {
 /* Do the mmap */
 void *do_mmap(void *addr, size_t length, int writable, struct file *file,
               off_t offset) {
+
   struct thread *curr = thread_current();
 
-  /* If addr is null or not page-aligned. */
-  if (addr == NULL || (uint64_t)addr % PGSIZE) return NULL;
+  /* If addr or offset is not page-aligned. */
+  if ((uint64_t)addr % PGSIZE || offset % PGSIZE) return NULL;
 
   /* If addr is in spt. */
   for (void *p = addr; p < addr + length; p += PGSIZE) {
@@ -141,20 +144,10 @@ void do_munmap(void *addr) {
   void *map_addr = page->file.map_addr;
   size_t length = page->file.length;
 
-  /* If addr is valid mapped-address, */
-  for (void *p = addr; length > 0; p += PGSIZE) {
-    size_t page_length = length < PGSIZE ? length : PGSIZE;
+  /* Remove page from spt and pml4.
+   * Write back file if page is VM_FILE. */
+  spt_remove_page(&curr->spt, page);
 
-    page = spt_find_page(&curr->spt, p);
-    if (page == NULL) {
-      return;
-    }
-
-    /* Remove page from spt and pml4.
-     * Write back file if page is VM_FILE. */
-    spt_remove_page(&curr->spt, page);
-    length -= page_length;
-  }
 }
 
 /* Initialize file-backed frame. */

@@ -21,6 +21,21 @@
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
+void halt(void);
+void exit(int);
+bool create(const char *, unsigned);
+int open(const char *);
+void close(int);
+int read(int, void *, unsigned);
+int write(int, const void *, unsigned);
+int dup2(int, int);
+tid_t fork(const char *, struct intr_frame *);
+int exec(const char *);
+bool remove(const char *);
+void seek(int, unsigned);
+unsigned tell(int);
+void *mmap(void *, size_t, int, int, off_t);
+void munmap(void *);
 
 /* System call.
  *
@@ -35,25 +50,13 @@ void syscall_handler(struct intr_frame *);
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
+/* Validations. */
+#define is_valid_ptr(ptr) ((ptr) != NULL && (uint64_t)(ptr) < KERN_BASE)
+#define is_valid_fd(int) ((int >= 0) && (int < MAX_FD))
+
 static int allocate_fd(void);
 static void free_fd(int fd);
-static int64_t get_user(const uint8_t *uaddr);
-static bool put_user(uint8_t *udst, uint8_t byte);
-
-void halt(void);
-void exit(int);
-bool create(const char *, unsigned);
-int open(const char *);
-void close(int);
-int read(int, void *, unsigned);
-int write(int, const void *, unsigned);
-int dup2(int, int);
-tid_t fork(const char *, struct intr_frame *);
-int exec(const char *);
-bool remove(const char *);
-void seek(int, unsigned);
-unsigned tell(int);
-void* mmap(void*, size_t, int, int, off_t);
+static bool pg_write_protect(void *va, size_t size);
 
 void syscall_init(void) {
   write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 | ((uint64_t)SEL_KCSEG)
@@ -67,22 +70,7 @@ void syscall_init(void) {
             FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
-/* Returns if present page is writable.
- * Returns false if page is not present. */
-static bool pg_write_protect(void *va, size_t size) {
-  struct thread *curr = thread_current();
-  /* from va to va + size. */
-  for (void *p = va; p < va + size; p += PGSIZE) {
-    uint64_t *pte = pml4e_walk(curr->pml4, pg_round_down(p), 0);
-    if (*pte != NULL && !is_writable(pte)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /* System call table. */
-
 
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f) {
@@ -151,32 +139,13 @@ void syscall_handler(struct intr_frame *f) {
       f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
       break;
     }
-    case SYS_MUNMAP : {
+    case SYS_MUNMAP: {
       munmap(f->R.rdi);
       break;
     }
     default:
       break;
   }
-}
-
-/* Unmap memmory. */
-void munmap(void* addr) {
-  if(addr == NULL) return;
-  do_munmap(addr);
-}
-
-/* Memory mapping. */
-void* mmap(void* addr, size_t length, int writable, int fd, off_t offset) {
-  if (!is_valid_fd(fd)) return NULL;
-
-  struct file** fdt = thread_current()->fdt;
-  struct file* file = fdt[fd];
-  if(is_file_std(file)) return NULL;
-
-  if(length <= 0) return NULL;
-
-  return do_mmap(addr, length, writable, file, offset); 
 }
 
 /* Power off system. */
@@ -194,12 +163,13 @@ void exit(int status) {
 
 /* Create a new file. */
 bool create(const char *file, unsigned initial_size) {
-  if (file == NULL) exit(-1);
+  if (!is_valid_ptr(file)) exit(-1);
   return filesys_create(file, initial_size);
 }
 
 /* Open a new file. */
 int open(const char *file_name) {
+  if (!is_valid_ptr(file_name)) exit(-1);
   if (file_name == NULL) return -1;
   struct thread *curr = thread_current();
 
@@ -250,6 +220,7 @@ void close(int fd) {
 
 /* Read from file to buffer. */
 int read(int fd, void *buffer, unsigned size) {
+  if (!is_valid_ptr(buffer)) exit(-1);
   /* If page is write-protect, exit. */
   if (pg_write_protect(buffer, size)) exit(-1);
 
@@ -276,6 +247,7 @@ int read(int fd, void *buffer, unsigned size) {
 
 /* Write from buffer to file. */
 int write(int fd, const void *buffer, unsigned size) {
+  if (!is_valid_ptr(buffer)) exit(-1);
   if (!is_valid_fd(fd)) return 0;
   struct file **fdt = thread_current()->fdt;
 
@@ -337,6 +309,7 @@ int filesize(int fd) {
 
 /* Fork a child process. */
 tid_t fork(const char *thread_name, struct intr_frame *user_if) {
+  if (!is_valid_ptr(thread_name)) exit(-1);
   ASSERT(user_if);
   return process_fork(thread_name, user_if);
 }
@@ -349,6 +322,7 @@ int wait(tid_t tid) {
 
 /* Execute process. */
 int exec(const char *cmd_line) {
+  if (!is_valid_ptr(cmd_line)) exit(-1);
   const char *fn_copy = palloc_get_page(0);
   strlcpy(fn_copy, cmd_line, strlen(cmd_line) + 1);
   int success = process_exec(fn_copy);
@@ -357,6 +331,7 @@ int exec(const char *cmd_line) {
 
 /* Remove file. */
 bool remove(const char *file) {
+  if (!is_valid_ptr(file)) exit(-1);
   if (file == NULL) return false;
   return filesys_remove(file);
 }
@@ -389,6 +364,28 @@ unsigned tell(int fd) {
   return rtn;
 }
 
+/* Memory mapping. */
+void *mmap(void *addr, size_t length, int writable, int fd, off_t offset) {
+  if (!is_valid_ptr(addr)) return NULL;
+  if (!is_valid_ptr(addr + length)) return NULL;
+  if (!is_valid_fd(fd)) return NULL;
+
+  struct file **fdt = thread_current()->fdt;
+  struct file *file = fdt[fd];
+
+  /* Exceptions. */
+  if (is_file_std(file)) return NULL;
+  if (length <= 0) return NULL;
+
+  return do_mmap(addr, length, writable, file, offset);
+}
+
+/* Unmap memory. */
+void munmap(void *addr) {
+  if (!is_valid_ptr(addr)) return NULL;
+  do_munmap(addr);
+}
+
 /* Get freed file descriptor */
 static int allocate_fd() {
   struct thread *curr = thread_current();
@@ -406,4 +403,18 @@ static int allocate_fd() {
 static void free_fd(int fd) {
   ASSERT(is_valid_fd(fd))
   thread_current()->fdt[fd] = NULL;
+}
+
+/* Returns if present page is writable.
+ * Returns false if page is not present. */
+static bool pg_write_protect(void *va, size_t size) {
+  struct thread *curr = thread_current();
+  /* from va to va + size. */
+  for (void *p = va; p < va + size; p += PGSIZE) {
+    uint64_t *pte = pml4e_walk(curr->pml4, pg_round_down(p), 0);
+    if (*pte != NULL && !is_writable(pte)) {
+      return true;
+    }
+  }
+  return false;
 }
