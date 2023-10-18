@@ -120,6 +120,7 @@ struct file_info {
   size_t bytes;
 };
 
+
 #include "threads/thread.h"
 void supplemental_page_table_init(struct supplemental_page_table *spt);
 bool supplemental_page_table_copy(struct supplemental_page_table *dst,

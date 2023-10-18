@@ -81,6 +81,9 @@ static bool pg_write_protect(void *va, size_t size) {
   return false;
 }
 
+/* System call table. */
+
+
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f) {
   switch (f->R.rax) {
@@ -159,7 +162,7 @@ void syscall_handler(struct intr_frame *f) {
 
 /* Unmap memmory. */
 void munmap(void* addr) {
-  if(addr == NULL) return NULL;
+  if(addr == NULL) return;
   do_munmap(addr);
 }
 

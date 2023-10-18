@@ -338,11 +338,19 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
 
   if (!pg_present(src_page)) {
     /* If uninitialized segement page, copy file info. */
-    struct file_info *dsc_aux;
-    struct file_info *src_aux = (struct file_info *)src_page->uninit.aux;
-
-    dsc_aux = calloc(1, sizeof(struct file_info));
-    memcpy(dsc_aux, src_aux, sizeof(struct file_info));
+    void *dsc_aux;
+    void *src_aux = src_page->uninit.aux;
+    size_t aux_size;
+    switch (page_get_type(src_page)) {
+      case VM_ANON:
+        printf("🔥 copy anon page\n");
+        aux_size = sizeof(struct file_info);
+      case VM_FILE:
+        printf("🔥 copy file page\n");
+        aux_size = sizeof(struct file_page);
+    }
+    dsc_aux = calloc(1, aux_size);
+    memcpy(dsc_aux, src_aux, aux_size);
     dsc_page->uninit.aux = dsc_aux;
   } else {
     /* Claim page if present. */

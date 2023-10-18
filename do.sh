@@ -124,6 +124,8 @@ SM_SEQ_RANDOM="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/filesys/base/sm-
 SYN_READ="pintos -v -k -T 300 -m 20   --fs-disk=10 -p tests/filesys/base/syn-read:syn-read -p tests/filesys/base/child-syn-read:child-syn-read --swap-disk=4 -- -q   -f run syn-read"
 SYN_REMOVE="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/filesys/base/syn-remove:syn-remove --swap-disk=4 -- -q   -f run syn-remove"
 SYN_WRITE="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/filesys/base/syn-write:syn-write -p tests/filesys/base/child-syn-wrt:child-syn-wrt --swap-disk=4 -- -q   -f run syn-write"
+
+# threads
 ALARM_SINGLE="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run alarm-single"
 ALARM_MULTIPLE="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run alarm-multiple"
 ALARM_SIMULTANEOUS="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run alarm-simultaneous"
@@ -133,7 +135,7 @@ ALARM_NEGATIVE="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -t
 PRIORITY_CHANGE="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run priority-change"
 PRIORITY_DONATE_ONE="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run priority-donate-one"
 PRIORITY_DONATE_MULTI="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run priority-donate-multiple"
-PRIORITY_DONATE_MULTI="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run priority-donate-multiple2"
+PRIORITY_DONATE_MULTI2="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run priority-donate-multiple2"
 PRIORITY_DONATE_NEST="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run priority-donate-nest"
 PRIORITY_DONATE_SEMA="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run priority-donate-sema"
 PRIORITY_DONATE_LOWER="pintos -v -k -T 60 -m 20   --fs-disk=10  --swap-disk=4 -- -q  -threads-tests -f run priority-donate-lower"
@@ -151,6 +153,6 @@ make
 cd build
 source ../../activate
 
-$FORK_RECURSIVE
+$MMAP_EXIT
 # $READ_BOUNDAR
 
