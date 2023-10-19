@@ -64,13 +64,15 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
 
 /* Swap out the page by writeback contents to the file. */
 static bool file_backed_swap_out(struct page *page) {
-    struct thread* curr = thread_current();
+  struct thread* curr = thread_current();
   struct file_page *file_page = &page->file;
   
   struct page* head = spt_get_head(page);
-  file_write_back(page, head);
-  page->frame = NULL;
+  if(!file_write_back(page, head)) {
+    return false;
+  }
 
+  page->frame = NULL;
   pml4_clear_page(curr->pml4, page->va);
   page->flags = page->flags & ~PTE_P;
   return true;
@@ -209,7 +211,6 @@ static bool lazy_load_file(struct page *page, void *aux) {
 /* Write back to file. Called when unmap. */
 static bool file_write_back(struct page *page, struct page *head) {
   ASSERT(page->operations->type == VM_FILE)
-  ASSERT(page->frame)
 
   struct thread *curr = thread_current();
   /* If page is present and not dirty, return. */

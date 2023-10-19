@@ -87,7 +87,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
   if (spt_find_page(spt, upage) == NULL) {
     page = calloc(1, sizeof(struct page));
     if(page == NULL) PANIC("Out of memory.\n");
-    
+
     /* If upage is not a stack. */
     switch (type) {
       case VM_ANON:
@@ -175,6 +175,7 @@ static struct frame *vm_evict_frame(void) {
   struct frame *victim = vm_get_victim();
   /* TODO: swap out the victim and return the evicted frame. */
   if(swap_out(victim->page)) {
+    memset(victim->kva, 0, PGSIZE);
     return victim;
   }
   return NULL;
