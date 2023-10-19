@@ -59,6 +59,7 @@ static bool anon_swap_in(struct page *page, void *kva) {
   
   /* Install page in pml4. */
   install_page(page);
+  page->flags = page->flags | PTE_P;
 
   return true;
 }
@@ -84,6 +85,7 @@ static bool anon_swap_out(struct page *page) {
 
   page->frame = NULL;
   pml4_clear_page(curr->pml4, page->va);
+  page->flags = page->flags & ~PTE_P;
 
   // TODO: 예외처리
   return true;

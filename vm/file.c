@@ -53,14 +53,14 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
 
 /* Swap in the page by read contents from the file. */
 static bool file_backed_swap_in(struct page *page, void *kva) {
-  struct file_page *file_page UNUSED = &page->file;
+  struct file_page *file_page = &page->file;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool file_backed_swap_out(struct page *page) {
-  struct file_page *file_page UNUSED = &page->file;
-}
+  struct file_page *file_page = &page->file;
 
+}
 
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
@@ -68,24 +68,36 @@ static void file_backed_destroy(struct page *page) {
   struct thread *curr = thread_current();
   struct file_page *file_page = &page->file;
 
+  /* If page is alreay written back, return. */
+  if(pg_writeback(page)) {
+    return;
+  }
+
   /* Get head-page. */
-  void *p = page->va;
   struct page *head = spt_get_head(page);
   ASSERT(head != NULL)
   page = head;
 
-  while (page) {
+  /* For loop. */
+  void *p = page->va;
+  size_t length = page->file.length;
+
+  while (length > 0 && page) {
     /* Write back to file, exit -1 if false. */
     if (pg_present(page) && !file_write_back(page, head)) {
       curr->exit_code = -1;
       thread_exit();
     }
+    page->flags = page->flags | PG_WB;
 
     /* Clear up. */
     pml4_clear_page(curr->pml4, page->va);
-    palloc_free_page(page->frame->kva);
+    if(page->frame) {
+      palloc_free_page(page->frame->kva);
+    }
 
     p += PGSIZE;
+    length -= PGSIZE;
     page = spt_find_page(&curr->spt, p);
   }
 
