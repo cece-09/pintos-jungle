@@ -54,10 +54,16 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
 
 /* Swap in the page by read contents from the file. */
 static bool file_backed_swap_in(struct page *page, void *kva) {
-  struct file_page *file_page = &page->file;
   struct page *head = spt_get_head(page);
-  do_page_read_write(page, head, file_read);
+  ASSERT(head != NULL)
 
+  /* Read from file to kva. */
+  if(!do_page_read_write(page, head, file_read))  {
+    printf("🩵 file read failed. %p\n", page->va);
+    return false;
+  }
+  
+  /* Install in pml4, mark as present. */
   install_page(page);
   page->flags = page->flags | PTE_P;
   return true;
@@ -65,17 +71,21 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
 
 /* Swap out the page by writeback contents to the file. */
 static bool file_backed_swap_out(struct page *page) {
+  printf("👊 swap out %p\n", page->va);
   struct thread *curr = thread_current();
-  struct file_page *file_page = &page->file;
 
   struct page *head = spt_get_head(page);
+  ASSERT(head != NULL)
+
   if (!file_write_back(page, head)) {
+    printf("🩵 file write failed. %p\n", page->va);
     return false;
   }
-
-  page->frame = NULL;
+  
+  /* Clear from pml4, mark as unpresent. */
   pml4_clear_page(curr->pml4, page->va);
   page->flags = page->flags & ~PTE_P;
+  page->frame = NULL;
   return true;
 }
 
@@ -307,5 +317,5 @@ static struct page *spt_get_head(struct page *page) {
 /* Get file_page struct. */
 static struct file_page *get_file_page(struct page *page) {
   ASSERT(page_get_type(page) == VM_FILE)
-  return pg_present(page) ? &page->file : page->uninit.aux;
+  return page->operations->type == VM_FILE ? &page->file : page->uninit.aux;
 }
