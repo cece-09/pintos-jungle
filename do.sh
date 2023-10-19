@@ -153,4 +153,4 @@ make
 cd build
 source ../../activate
 
-$LAZY_FILE
+$SWAP_ANON

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+
 #include "threads/malloc.h"
 #include "threads/mmu.h"
 #include "threads/pte.h"
@@ -15,6 +16,9 @@ static bool spt_hash_less_func(const struct hash_elem *,
                                const struct hash_elem *, void *);
 static void spt_free_page(struct hash_elem *, void *);
 static void spt_copy_page(struct hash_elem *, void *);
+
+static struct list frame_table;
+
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -28,6 +32,7 @@ void vm_init(void) {
   /* DO NOT MODIFY UPPER LINES. */
 
   /* TODO: Your code goes here. */
+  list_init(&frame_table);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -58,7 +63,6 @@ bool install_page(struct page *page) {
   bool success = false;
 
   if (pml4_get_page(curr->pml4, page->va) != NULL) {
-    // printf("evict the page?\n");
     return false;
   }
   if (!pml4_set_page(curr->pml4, page->va, kva, writable)) {
@@ -152,6 +156,13 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page) {
 static struct frame *vm_get_victim(void) {
   struct frame *victim = NULL;
   /* TODO: The policy for eviction is up to you. */
+  
+  if(list_empty(&frame_table)) {
+    PANIC("No entry in frame table!!!");
+  }
+
+  victim = list_entry(list_pop_front(&frame_table), struct frame, elem);
+
 
   return victim;
 }
@@ -159,9 +170,11 @@ static struct frame *vm_get_victim(void) {
 /* Evict one page and return the corresponding frame.
  * Return NULL on error.*/
 static struct frame *vm_evict_frame(void) {
-  struct frame *victim UNUSED = vm_get_victim();
+  struct frame *victim = vm_get_victim();
   /* TODO: swap out the victim and return the evicted frame. */
-
+  if(swap_out(victim->page)) {
+    return victim;
+  }
   return NULL;
 }
 
@@ -173,17 +186,19 @@ static struct frame *vm_get_frame(void) {
   struct frame *frame = NULL;
   frame = calloc(1, sizeof(struct frame));
   if (frame == NULL) {
-    // printf("Frame allocation failed.\n");
+    printf("Frame allocation failed.\n");
     return NULL;
   }
 
   /* Get anonymous frame. */
   frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
   if (frame->kva == NULL) {
-    free(frame);
-    // printf("Memory is full.\n");
-    return NULL;
+    frame = vm_evict_frame();
+    frame->page = NULL;
   }
+
+  /* Insert to frame table. */
+  list_push_back(&frame_table, &frame->elem);
 
   ASSERT(frame != NULL);
   ASSERT(frame->page == NULL);
