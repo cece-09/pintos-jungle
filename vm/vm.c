@@ -86,6 +86,8 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
   /* Check wheter the upage is already occupied or not. */
   if (spt_find_page(spt, upage) == NULL) {
     page = calloc(1, sizeof(struct page));
+    if(page == NULL) PANIC("Out of memory.\n");
+    
     /* If upage is not a stack. */
     switch (type) {
       case VM_ANON:

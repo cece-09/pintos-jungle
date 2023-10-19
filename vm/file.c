@@ -54,12 +54,26 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
 /* Swap in the page by read contents from the file. */
 static bool file_backed_swap_in(struct page *page, void *kva) {
   struct file_page *file_page = &page->file;
+  struct page* head = spt_get_head(page);
+  do_page_read_write(page, head, file_read);
+
+  install_page(page);
+  page->flags = page->flags | PTE_P;
+  return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool file_backed_swap_out(struct page *page) {
+    struct thread* curr = thread_current();
   struct file_page *file_page = &page->file;
+  
+  struct page* head = spt_get_head(page);
+  file_write_back(page, head);
+  page->frame = NULL;
 
+  pml4_clear_page(curr->pml4, page->va);
+  page->flags = page->flags & ~PTE_P;
+  return true;
 }
 
 
@@ -80,7 +94,7 @@ static void file_backed_destroy(struct page *page) {
 
   /* For loop. */
   void *p = page->va;
-  size_t length = page->file.length;
+  long length = (long)page->file.length;
 
   while (length > 0 && page) {
     /* Write back to file, exit -1 if false. */
@@ -130,12 +144,10 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
 
   /* Allocate page with lazy loading. */
   struct file *mmap_file = file_duplicate(file);
-  size_t left = length;
+  long left = (long)length;
   int cnt = 0;
 
   while (left > 0) {
-    size_t page_length = length < PGSIZE ? length : PGSIZE;
-
     /* Save infos for initializing file-backed page. */
     struct file_page *aux = calloc(1, sizeof(struct file_page));
 
@@ -150,7 +162,7 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
       return NULL;
     }
 
-    left -= page_length;
+    left -= PGSIZE;
     cnt++;
   }
   return addr;
