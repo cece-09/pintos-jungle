@@ -149,7 +149,6 @@ bool spt_insert_page(struct supplemental_page_table *spt, struct page *page) {
 /* Remove page in spt. */
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page) {
   hash_delete(&spt->hash, &page->elem);
-
   vm_dealloc_page(page);
   return true;
 }
@@ -226,7 +225,7 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
-  struct supplemental_page_table *spt = &thread_current()->spt;
+    struct supplemental_page_table *spt = &thread_current()->spt;
   void *upage = pg_round_down(addr);
   void *curr_rsp = (void *)f->rsp;
 
