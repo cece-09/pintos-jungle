@@ -153,4 +153,4 @@ make
 cd build
 source ../../activate
 
-$MMAP_KERNEL
+$LAZY_FILE

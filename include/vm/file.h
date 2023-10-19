@@ -6,6 +6,9 @@
 struct page;
 enum vm_type;
 
+/* Read/Write function type. */
+typedef off_t file_rw_func(struct file *, const void *, off_t);
+
 struct file_page {
     struct file* file;
     off_t offset;

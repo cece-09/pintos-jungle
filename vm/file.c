@@ -7,9 +7,11 @@
 static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
-static void file_write_back(struct page *page);
+static bool file_write_back(struct page *page, struct page *head);
 static bool lazy_load_file(struct page *page, void *aux);
-static struct file *page_get_file(struct page *page);
+static bool do_page_read_write(struct page *page, struct page *head,
+                               file_rw_func func);
+static struct page *spt_get_head(struct page *page);
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations file_ops = {
@@ -40,7 +42,11 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
   /* Initialize file page fields. */
   struct file_page *file_page = &page->file;
   *file_page = (struct file_page){
-      .file = file, .offset = offset, .length = length, .map_addr = map_addr};
+      .file = file,        /* mapped file ptr. */
+      .offset = offset,    /* map start offset. */
+      .length = length,    /* length of mapping. */
+      .map_addr = map_addr /* va where mapping starts. */
+  };
   free(aux);
   return true;
 }
@@ -55,21 +61,24 @@ static bool file_backed_swap_out(struct page *page) {
   struct file_page *file_page UNUSED = &page->file;
 }
 
+
+
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void file_backed_destroy(struct page *page) {
   struct thread *curr = thread_current();
   struct file_page *file_page = &page->file;
 
-  if (!is_file_head(page, &page->file)) return;
-
-  /* Head page is already removed from hash table.
-   * Clean up sub-pages. */
+  /* Get head-page. */
   void *p = page->va;
+  struct page *head = spt_get_head(page);
+  ASSERT(head != NULL)
+  page = head;
 
   while (page) {
-    /* Write back to file. */
-    if (pg_present(page)) {
-      file_write_back(page);
+    /* Write back to file, exit -1 if false. */
+    if (pg_present(page) && !file_write_back(page, head)) {
+      curr->exit_code = -1;
+      thread_exit();
     }
 
     /* Clear up. */
@@ -88,25 +97,31 @@ static void file_backed_destroy(struct page *page) {
 /* Do the mmap */
 void *do_mmap(void *addr, size_t length, int writable, struct file *file,
               off_t offset) {
-
   struct thread *curr = thread_current();
 
   /* If addr or offset is not page-aligned. */
-  if ((uint64_t)addr % PGSIZE || offset % PGSIZE) return NULL;
+  if ((uint64_t)addr % PGSIZE || offset % PGSIZE) {
+    return NULL;
+  }
 
   /* If addr is in spt. */
   for (void *p = addr; p < addr + length; p += PGSIZE) {
-    if (spt_find_page(&curr->spt, p)) return NULL;
+    if (spt_find_page(&curr->spt, p)) {
+      return NULL;
+    }
   }
 
   /* If addr in stack area. */
-  if (addr + length > STACK_LIMIT && addr < USER_STACK) return NULL;
+  if (addr + length > STACK_LIMIT && addr < USER_STACK) {
+    return NULL;
+  }
 
   /* Allocate page with lazy loading. */
   struct file *mmap_file = file_duplicate(file);
+  size_t left = length;
   int cnt = 0;
 
-  while (length > 0) {
+  while (left > 0) {
     size_t page_length = length < PGSIZE ? length : PGSIZE;
 
     /* Save infos for initializing file-backed page. */
@@ -116,14 +131,14 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     aux->file = cnt == 0 ? mmap_file : NULL; /* map file from */
     aux->offset = offset;                    /* offset, */
     aux->length = length;                    /* to length bytes. */
-    aux->map_addr = addr;                    /* map-start address. */
+    aux->map_addr = addr;                    /* va where mapping starts. */
 
     if (!vm_alloc_page_with_initializer(VM_FILE, addr + (cnt * PGSIZE),
                                         writable, lazy_load_file, aux)) {
       return NULL;
     }
 
-    length -= page_length;
+    left -= page_length;
     cnt++;
   }
   return addr;
@@ -147,93 +162,104 @@ void do_munmap(void *addr) {
   /* Remove page from spt and pml4.
    * Write back file if page is VM_FILE. */
   spt_remove_page(&curr->spt, page);
-
 }
 
 /* Initialize file-backed frame. */
 static bool lazy_load_file(struct page *page, void *aux) {
   ASSERT(page->operations->type == VM_FILE)
   ASSERT(page->frame)
+  
+  /* Get head-page. */
+  struct thread *curr = thread_current();
+  struct page *head = spt_get_head(page);
+  ASSERT(head != NULL)
 
-  struct file *file = page_get_file(page);
-  off_t offset = page->file.offset;
-  size_t length = page->file.length;
-  void *map_addr = page->file.map_addr;
-
-  /* Calculate page offset. */
-  off_t page_offset = (page->va - map_addr) % PGSIZE;
-
-  /* Calculate read-start point. */
-  off_t read_start = offset + page_offset * PGSIZE;
-
-  /* Calculate read-bytes. */
-  off_t file_len = file_length(file);
-  size_t read_bytes = (offset + length) - read_start;
-  read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-  read_bytes = read_bytes < file_len ? read_bytes : file_len;
-
-  void *kva = page->frame->kva;
-  if (kva == NULL) return false;
-
-  /* Map with file. */
-  file_seek(file, read_start);
-  if (file_read(file, kva, read_bytes) != (int)read_bytes) {
+  /* Read file to page. */
+  if (!do_page_read_write(page, head, file_read)) {
+    printf("Fail to read file.\n");
     return false;
   }
   return true;
 }
 
 /* Write back to file. Called when unmap. */
-static void file_write_back(struct page *page) {
+static bool file_write_back(struct page *page, struct page *head) {
   ASSERT(page->operations->type == VM_FILE)
+  ASSERT(page->frame)
 
   struct thread *curr = thread_current();
+  /* If page is present and not dirty, return. */
+  if (!pml4_is_dirty(curr->pml4, page->va)) {
+    return true;
+  }
 
-  struct file *file = page_get_file(page);
+  /* Write back to file. */
+  if (!do_page_read_write(page, head, file_write)) {
+    printf("Fail to write back file.\n");
+    return false;
+  }
+  return true;
+}
+
+/* Calculate page offset in mapped area
+ * and execute func handed by argument. */
+static bool do_page_read_write(struct page *page, struct page *head,
+                               file_rw_func func) {
+  struct file *file = head->file.file;
   off_t offset = page->file.offset;
   size_t length = page->file.length;
   void *map_addr = page->file.map_addr;
   void *kva = page->frame->kva;
 
-  ASSERT(kva && file)
+  ASSERT(page->frame && kva)
 
-  /* If page is present and not dirty, return. */
-  if (!pml4_is_dirty(curr->pml4, page->va)) {
-    return;
+  /* Calculate page offset. Starts from 1. */
+  off_t page_offset = (page->va - map_addr) / PGSIZE;
+
+  /* Calculate read-write-start point. */
+  off_t rw_start = offset + page_offset * PGSIZE;
+
+  /* Calculate read-write-bytes. */
+  file_seek(file, rw_start);
+  
+  /* 
+     offset                                   len  page-aligned
+       +----------+----------+----------+------+---+
+       |          |          |          |      |   |
+       |          |          |          |      |   |
+       |   page   |   page   |   page   |   page   |
+       |          |          |          |      |   |
+       |          |          |          |      |   |
+       +----------+----------+----------+------+---+
+
+       +----------+-------+
+       |                  |
+       |       file       |
+       |                  |
+       +----------+-------+
+
+       Take min(PGSIZE, (off+len)-rw_start, file_left) as rw_bytes of this page.
+       Page 0 takes PGSIZE,
+       Page 1 takes file_left, and so on.
+  */
+
+  off_t file_left = file_length(file) - file->pos;
+  size_t rw_bytes = (offset + length) - rw_start;
+  rw_bytes = rw_bytes < PGSIZE ? rw_bytes : PGSIZE;
+  rw_bytes = rw_bytes < file_left ? rw_bytes : file_left;
+
+  /* Do func. */
+  if (func(file, kva, rw_bytes) != (int)rw_bytes) {
+    return false;
   }
-
-  // TODO: lazy_load_file과 로직이 동일함. 수정할 것.
-  /* Calculate page offset. */
-  off_t page_offset = (page->va - map_addr) % PGSIZE;
-
-  /* Calculate read-start point. */
-  off_t write_start = offset + page_offset * PGSIZE;
-
-  /* Calculate read-bytes. */
-  off_t file_len = file_length(file);
-  size_t write_bytes = (offset + length) - write_start;
-  write_bytes = write_bytes < PGSIZE ? write_bytes : PGSIZE;
-  write_bytes = write_bytes < file_len ? write_bytes : file_len;
-
-  /* Write back to file. */
-  file_seek(file, write_start);
-  if (file_write(file, kva, write_bytes) != (int)write_bytes) {
-    PANIC("File write failed.");
-  }
+  return true;
 }
 
-/* Get mapped-file from head page. */
-static struct file *page_get_file(struct page *page) {
-  ASSERT(page->operations->type == VM_FILE)
+/* Get head page of this mapping. */
+static struct page *spt_get_head(struct page *page) {
   struct thread *curr = thread_current();
-
-  /* Get file address from head page. */
   if (is_file_head(page, &page->file)) {
-    return page->file.file;
+    return page;
   }
-
-  struct page *head_page;
-  head_page = spt_find_page(&curr->spt, page->file.map_addr);
-  ASSERT(head_page != NULL)
-  return head_page->file.file;
+  return spt_find_page(&curr->spt, page->file.map_addr);
 }
