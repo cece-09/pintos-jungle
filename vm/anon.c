@@ -14,8 +14,8 @@ static bool anon_swap_out(struct page *page);
 static void anon_destroy(struct page *page);
 
 /* Swap table. */
-static struct bitmap *swap_table; // disk sector 기록용
-#define SWAP_BITS 4096
+static struct bitmap *swap_table;
+#define SWAP_BITS 8192
 #define DISK_SEC_BYTE 512
 
 
@@ -68,13 +68,15 @@ static bool anon_swap_in(struct page *page, void *kva) {
 static bool anon_swap_out(struct page *page) {
   ASSERT(page->frame && page->frame->kva)
   struct thread* curr = thread_current();
-
   struct anon_page *anon_page = &page->anon;
 
   /* Find free disk sector */
   // TODO: size_t 와 disk_sector_t이 크기가 다름.
   size_t disk_sec = bitmap_scan(swap_table, 0, 1, false);
-  disk_sec *=  (PGSIZE / DISK_SEC_BYTE);
+  if(disk_sec == BITMAP_ERROR) {
+    PANIC("Swap disk is full.\n");
+  }
+  disk_sec *= (PGSIZE / DISK_SEC_BYTE);
 
   for(int i = 0; i < (PGSIZE / DISK_SEC_BYTE); i++) {
       disk_write(swap_disk, disk_sec+i, page->frame->kva  + (i * DISK_SEC_BYTE));
