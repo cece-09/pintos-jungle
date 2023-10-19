@@ -58,11 +58,10 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
   ASSERT(head != NULL)
 
   /* Read from file to kva. */
-  if(!do_page_read_write(page, head, file_read))  {
-    printf("🩵 file read failed. %p\n", page->va);
+  if (!do_page_read_write(page, head, file_read)) {
     return false;
   }
-  
+
   /* Install in pml4, mark as present. */
   install_page(page);
   page->flags = page->flags | PTE_P;
@@ -71,17 +70,15 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
 
 /* Swap out the page by writeback contents to the file. */
 static bool file_backed_swap_out(struct page *page) {
-  printf("👊 swap out %p\n", page->va);
   struct thread *curr = thread_current();
 
   struct page *head = spt_get_head(page);
   ASSERT(head != NULL)
 
   if (!file_write_back(page, head)) {
-    printf("🩵 file write failed. %p\n", page->va);
     return false;
   }
-  
+
   /* Clear from pml4, mark as unpresent. */
   pml4_clear_page(curr->pml4, page->va);
   page->flags = page->flags & ~PTE_P;
@@ -94,7 +91,8 @@ static void file_backed_destroy(struct page *page) {
   struct thread *curr = thread_current();
   struct file_page *file_page = &page->file;
 
-  /* If page is alreay written back, return. */
+  /* Write back to file.
+   * If page is alreay written back, return. */
   if (pg_writeback(page)) {
     return;
   }
@@ -106,15 +104,18 @@ static void file_backed_destroy(struct page *page) {
 
   /* For loop. */
   void *p = page->va;
-  struct file_page *fp = get_file_page(page);
-  void *map_addr = fp->map_addr;
+  void *map_addr = head->va;
 
   while (page && get_file_page(page)->map_addr == map_addr) {
-    /* If sub-page is not present, pass. */
+    /* Mark as written back. */
+    page->flags = page->flags | PG_WB;
+
     if (!pg_present(page)) {
+      /* Clearing uninit page will be handled by uninit_destroy.
+       * If swap-out page, no need to write back.
+       * Just go to next loop. */
       p += PGSIZE;
       page = spt_find_page(&curr->spt, p);
-      /* Handled by uninit_destroy. */
       continue;
     }
 
@@ -123,9 +124,6 @@ static void file_backed_destroy(struct page *page) {
       curr->exit_code = -1;
       thread_exit();
     }
-
-    /* Mark as written back. */
-    page->flags = page->flags | PG_WB;
 
     /* Clear up. */
     pml4_clear_page(curr->pml4, page->va);
