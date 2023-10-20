@@ -36,8 +36,9 @@ static void child_list_cleanup(struct list *);
 static void duplicate_fdt(struct thread *, struct thread *);
 static bool load(const char *file_name, struct intr_frame *if_);
 
-/* Control execution order. */
-static struct semaphore exec_sema;
+/* Filesys lock. */
+static struct lock filesys_lock;
+static struct semaphore filesys_sema;
 
 /* General process initializer for initd and other process. */
 static bool process_init(void) {
@@ -71,8 +72,10 @@ tid_t process_create_initd(const char *file_name) {
   char *save_ptr;
   strtok_r(file_name, " ", &save_ptr);
 
-  /* Init execute semaphore */
-  sema_init(&exec_sema, 1);
+  /* Init filesystem lock.
+   * See thread.h */
+  lock_init(&filesys_lock);
+  sema_init(&filesys_sema, 1);
 
   tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
   if (tid == TID_ERROR) palloc_free_page(fn_copy);
@@ -129,7 +132,6 @@ tid_t process_fork(const char *name, struct intr_frame *if_) {
 }
 
 #ifndef VM
-
 /* Duplicate the parent's address space by passing this function to the
  * pml4_for_each. This is only for the project 2.
  * @param va is virtual address of pte. */
@@ -192,7 +194,9 @@ static void __do_fork(void *aux) {
   process_activate(curr);
 
   /* Duplicate exec file. */
+  // lock_acquire(&filesys_lock);
   curr->exec_file = file_duplicate(parent->exec_file);
+  // lock_release(&filesys_lock);
 
 #ifdef VM
   supplemental_page_table_init(&curr->spt);
@@ -230,7 +234,7 @@ int process_exec(void *f_name) {
   struct thread *curr = thread_current();
   char *file_name = f_name;
   bool success = false;
-  
+
   /* We cannot use the intr_frame in the thread structure.
    * This is because when current thread rescheduled,
    * it stores the execution information to the member. */
@@ -244,7 +248,9 @@ int process_exec(void *f_name) {
 
   /* Close current exec file. */
   if (curr->exec_file) {
+    // lock_acquire(&filesys_lock);
     file_close(curr->exec_file);
+    // lock_release(&filesys_lock);
     curr->exec_file = NULL;
   }
 
@@ -254,7 +260,9 @@ int process_exec(void *f_name) {
 #endif
 
   /* And then load the binary */
+  sema_down(&filesys_sema);
   success = load(file_name, &_if);
+  sema_up(&filesys_sema);
 
   /* If load failed, quit. */
   palloc_free_page(file_name);
@@ -323,6 +331,11 @@ void process_exit(void) {
 
   /* Clean up pml4 */
   process_cleanup();
+
+  /* If sema value is 0, up. */
+  if(filesys_sema.value == 0) {
+    sema_up(&filesys_sema);
+  }
 
   /* Let parent process run. */
   if (curr->parent) {
@@ -408,7 +421,7 @@ static void child_list_cleanup(struct list *list) {
  */
 static void cleanup_fdt(struct file **fdt) {
   struct thread *curr = thread_current();
-  struct lock *file_lock;
+  struct lock *inode_lock;
   struct file *file;
 
   if (fdt == NULL) return;
@@ -428,9 +441,9 @@ static void cleanup_fdt(struct file **fdt) {
     }
 
     /* Else, release lock and close. */
-    file_lock = file_inode_lock(file);
-    if (file_lock->holder == curr) {
-      lock_release(file_lock);
+    inode_lock = file_inode_lock(file);
+    if (inode_lock->holder == curr) {
+      lock_release(inode_lock);
     }
     file_close(file);
   }
@@ -543,9 +556,7 @@ static bool load(const char *file_name, struct intr_frame *if_) {
   process_activate(thread_current());
 
   /* Open executable file. */
-  sema_down(&exec_sema);
   file = filesys_open(file_name);
-  sema_up(&exec_sema);
 
   if (file == NULL) {
     printf("load: %s: open failed\n", file_name);
@@ -822,7 +833,6 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 /* SPT - Load the segment from the file.
  * This called when the first page fault occurs on address VA.
  * VA is available when calling this function. */
-// TODO: mmap_init과 합치기
 static bool lazy_load_segment(struct page *page, void *aux) {
   struct thread *curr = thread_current();
   void *upage = page->va;
@@ -842,14 +852,15 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   off_t ofs = file_info->ofs;
 
   /* Load this page. */
+  sema_down(&filesys_sema);
   file_seek(file, ofs);
   if (file_read(file, kva, bytes) != (int)bytes) {
     printf("process.c:838 File is not read properly.\n");
+    sema_up(&filesys_sema);
     return false;
   }
+  sema_up(&filesys_sema);
 
-  // TODO: 여기서 file-backed memory로 바꿔준다.
-  
   /* Free file info. */
   free(file_info);
   return true;
@@ -908,7 +919,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 static bool setup_stack(struct intr_frame *if_) {
   void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
   bool success = false;
-  
+
   /* Since addr is stack bottom, vm_alloc_page claims page immediately. */
   if (vm_alloc_page(VM_ANON, stack_bottom, true)) {
     if_->rsp = USER_STACK;

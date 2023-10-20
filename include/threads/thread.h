@@ -231,9 +231,7 @@ void thread_set_load_avg(void);
 int get_recent_cpu(struct thread *);
 void set_recent_cpu(struct thread *);
 void thread_incr_recent_cpu(void);
-
 int calc_priority(struct thread *);
-
 void thread_reset_priority(void);
 
 /* list cmp funtcions */

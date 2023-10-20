@@ -153,4 +153,4 @@ make
 cd build
 source ../../activate
 
-$PAGE_MERGE_STK
+$PAGE_MERGE_MM

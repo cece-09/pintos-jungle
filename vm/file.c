@@ -15,6 +15,9 @@ static bool do_page_read_write(struct page *page, struct page *head,
 static struct page *spt_get_head(struct page *page);
 static struct file_page *get_file_page(struct page *page);
 
+/* Control lazy load order. */
+static struct lock filesys_lock;
+
 /* DO NOT MODIFY this struct */
 static const struct page_operations file_ops = {
     .swap_in = file_backed_swap_in,
@@ -24,7 +27,10 @@ static const struct page_operations file_ops = {
 };
 
 /* The initializer of file vm */
-void vm_file_init(void) {}
+void vm_file_init(void) {
+  /* Init filesys lock. */
+  lock_init(&filesys_lock);
+}
 
 /* Initialize the file backed page */
 bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
@@ -58,10 +64,13 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
   struct page *head = spt_get_head(page);
   ASSERT(head != NULL)
 
+  bool succ;
+
   /* Read from file to kva. */
-  if (!do_page_read_write(page, head, file_read)) {
-    return false;
-  }
+//   lock_acquire(&filesys_lock);
+  succ = do_page_read_write(page, head, file_read);
+//   lock_release(&filesys_lock);
+  if (!succ) return false;
 
   /* Install in pml4, mark as present. */
   install_page(page);
@@ -75,9 +84,12 @@ static bool file_backed_swap_out(struct page *page) {
   struct page *head = spt_get_head(page);
   ASSERT(head != NULL)
 
-  if (!file_write_back(page, head)) {
-    return false;
-  }
+  bool succ;
+
+//   lock_acquire(&filesys_lock);
+  succ = file_write_back(page, head);
+//   lock_release(&filesys_lock);
+  if (!succ) return false;
 
   /* Clear from pml4, mark as unpresent. */
   pml4_set_dirty(curr->pml4, page->va, false);
@@ -197,11 +209,12 @@ static bool lazy_load_file(struct page *page, void *aux) {
   ASSERT(head != NULL)
 
   /* Read file to page. */
-  if (!do_page_read_write(page, head, file_read)) {
-    printf("Fail to read file.\n");
-    return false;
-  }
-  return true;
+  bool succ;
+//   lock_acquire(&filesys_lock);
+  succ = do_page_read_write(page, head, file_read);
+//   lock_release(&filesys_lock);
+
+  return succ;
 }
 
 /* Write back all file-backed pages starting from head-page. */
@@ -225,11 +238,8 @@ static void file_write_back_all(struct page *head) {
       continue;
     }
 
-    /* Write back to file, exit -1 if false. */
-    if (!file_write_back(page, head)) {
-      curr->exit_code = -1;
-      thread_exit();
-    }
+    /* Write back to file. */
+    file_write_back(page, head);
 
     p += PGSIZE;
     page = spt_find_page(&curr->spt, p);

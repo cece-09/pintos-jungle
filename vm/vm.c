@@ -231,6 +231,7 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
+  
   struct thread *curr = thread_current();
   struct supplemental_page_table *spt = &curr->spt;
   void *upage = pg_round_down(addr);
