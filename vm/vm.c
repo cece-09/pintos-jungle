@@ -316,24 +316,25 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dsc,
   return true;
 }
 
-/* SPT - Free the resource hold by the supplemental page table */
+/* Free the resource hold by the supplemental page table */
 void supplemental_page_table_kill(struct supplemental_page_table *spt) {
-  /* TODO: Destroy all the supplemental_page_table hold by thread and
-   * TODO: writeback all the modified contents to the storage. */
-  /* TODO: swap in/out or file-mapped by mmap - writeback. */
+  if (!spt) return;
 
-  /* SPT - writeback. */
-  if (spt) hash_destroy(&spt->hash, spt_free_page);
+  /* Write back file_backed_pages first, */
+  hash_apply(&spt->hash, spt_file_writeback);
+
+  /* Destroy hash. */
+  hash_destroy(&spt->hash, spt_free_page);
   return;
 }
 
-/* SPT - Hash hash function: use hash bytes. */
+/* Hash hash function which uses hash bytes. */
 static uint64_t spt_hash_func(const struct hash_elem *e, void *aux UNUSED) {
   struct page *page = hash_entry(e, struct page, elem);
   return hash_bytes(&page->va, sizeof(page->va));
 }
 
-/* SPT - Hash less function: according to va. */
+/* Hash less function. */
 static bool spt_hash_less_func(const struct hash_elem *_a,
                                const struct hash_elem *_b, void *aux UNUSED) {
   struct page *a = hash_entry(_a, struct page, elem);
@@ -341,13 +342,13 @@ static bool spt_hash_less_func(const struct hash_elem *_a,
   return (uint64_t)a->va < (uint64_t)b->va;
 }
 
-/* SPT -  Hash action function: free page struct. */
+/* Hash action function which frees page struct. */
 static void spt_free_page(struct hash_elem *e, void *aux UNUSED) {
   struct page *page = hash_entry(e, struct page, elem);
   if (page) vm_dealloc_page(page);
 }
 
-/* SPT - Hash action function: copy a single page. */
+/* Hash action function which copies a single page. */
 static void spt_copy_page(struct hash_elem *e, void *aux) {
   struct supplemental_page_table *dsc_spt =
       (struct supplemental_page_table *)aux;

@@ -8,6 +8,7 @@ static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
 static bool file_write_back(struct page *page, struct page *head);
+static void file_write_back_all(struct page *head);
 static bool lazy_load_file(struct page *page, void *aux);
 static bool do_page_read_write(struct page *page, struct page *head,
                                file_rw_func func);
@@ -71,7 +72,6 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
 /* Swap out the page by writeback contents to the file. */
 static bool file_backed_swap_out(struct page *page) {
   struct thread *curr = thread_current();
-
   struct page *head = spt_get_head(page);
   ASSERT(head != NULL)
 
@@ -90,52 +90,14 @@ static bool file_backed_swap_out(struct page *page) {
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void file_backed_destroy(struct page *page) {
   struct thread *curr = thread_current();
-  struct file_page *file_page = &page->file;
 
-  /* Write back to file.
-   * If page is alreay written back, return. */
-  if (pg_writeback(page)) {
-    return;
-  }
-
-  /* Get head-page. */
-  struct page *head = spt_get_head(page);
-  ASSERT(head != NULL)
-  page = head;
-
-  /* For loop. */
-  void *p = page->va;
-  void *map_addr = head->va;
-
-  while (page && get_file_page(page)->map_addr == map_addr) {
-    /* Mark as written back. */
-    page->flags = page->flags | PG_WB;
-
-    if (!pg_present(page)) {
-      /* Clearing uninit page will be handled by uninit_destroy.
-       * If swap-out page, no need to write back.
-       * Just go to next loop. */
-      p += PGSIZE;
-      page = spt_find_page(&curr->spt, p);
-      continue;
-    }
-
-    /* Write back to file, exit -1 if false. */
-    if (!file_write_back(page, head)) {
-      curr->exit_code = -1;
-      thread_exit();
-    }
-
-    /* Clear up. */
+  /* Clear up if frame-mapped page. */
+  if (pg_present(page)) {
     pml4_clear_page(curr->pml4, page->va);
     palloc_free_page(page->frame->kva);
-
-    p += PGSIZE;
-    page = spt_find_page(&curr->spt, p);
+    free(page->frame);
   }
 
-  /* Close file. */
-  file_close(file_page->file);
   return;
 }
 
@@ -202,12 +164,26 @@ void do_munmap(void *addr) {
 
   size_t length = file_page->length;
 
-  /* Remove head-page and all sub-pages from spt and pml4.
-   * Write back file if page is VM_FILE. */
+  /* Write back all pages starting from head. */
+  file_write_back_all(page);
+
+  /* Remove head-page and all sub-pages from spt and pml4. */
   for (void *p = addr; p < addr + length; p += PGSIZE) {
     page = spt_find_page(&curr->spt, p);
     spt_remove_page(&curr->spt, page);
   }
+}
+
+/* Hash action function which write all file-backed pages
+ * back to disk if page is dirty.
+ * See supplemental_page_table_kill in vm.c */
+void spt_file_writeback(struct hash_elem *e, void *aux) {
+  struct page *page = hash_entry(e, struct page, elem);
+  if (page_get_type(page) != VM_FILE) return;
+  if (!is_file_head(page, get_file_page(page))) return;
+
+  /* If page is head-page of file-backed pages, write back. */
+  file_write_back_all(page);
 }
 
 /* Initialize file-backed frame. */
@@ -228,11 +204,46 @@ static bool lazy_load_file(struct page *page, void *aux) {
   return true;
 }
 
-/* Write back to file. Called when unmap. */
+/* Write back all file-backed pages starting from head-page. */
+static void file_write_back_all(struct page *head) {
+  struct thread *curr = thread_current();
+
+  void *p = head->va;
+  void *map_addr = head->va;
+  struct page *page = head;
+
+  while (page && get_file_page(page)->map_addr == map_addr) {
+    /* Mark as written back. */
+    page->flags = page->flags | PG_WB;
+
+    if (!pg_present(page)) {
+      /* Clearing uninit page will be handled by uninit_destroy.
+       * If swap-out page, no need to write back.
+       * Just go to next loop. */
+      p += PGSIZE;
+      page = spt_find_page(&curr->spt, p);
+      continue;
+    }
+
+    /* Write back to file, exit -1 if false. */
+    if (!file_write_back(page, head)) {
+      curr->exit_code = -1;
+      thread_exit();
+    }
+
+    p += PGSIZE;
+    page = spt_find_page(&curr->spt, p);
+  }
+
+  /* Close file. */
+  file_close(get_file_page(head)->file);
+}
+
+/* Write back a single page to file. Called when unmap. */
 static bool file_write_back(struct page *page, struct page *head) {
   ASSERT(page->operations->type == VM_FILE)
-
   struct thread *curr = thread_current();
+
   /* If page is present and not dirty, return. */
   if (!pml4_is_dirty(curr->pml4, page->va)) {
     return true;

@@ -153,4 +153,4 @@ make
 cd build
 source ../../activate
 
-$SWAP_ITER
+$SWAP_ANON
