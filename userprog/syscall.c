@@ -37,6 +37,8 @@ unsigned tell(int);
 void *mmap(void *, size_t, int, int, off_t);
 void munmap(void *);
 
+static struct semaphore sys_sema;
+
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -68,6 +70,8 @@ void syscall_init(void) {
    * mode stack. Therefore, we masked the FLAG_FL. */
   write_msr(MSR_SYSCALL_MASK,
             FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+  sema_init(&sys_sema, 1);
 }
 
 /* System call table. */
@@ -75,7 +79,7 @@ void syscall_init(void) {
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f) {
   struct thread *curr = thread_current();
-  curr->user_rsp = (void*)f->rsp;
+  curr->user_rsp = (void *)f->rsp;
 
   switch (f->R.rax) {
     case SYS_HALT: {
@@ -87,7 +91,9 @@ void syscall_handler(struct intr_frame *f) {
       break;
     }
     case SYS_FORK: {
+      sema_down(&sys_sema);
       f->R.rax = fork((const char *)f->R.rdi, f);
+      sema_up(&sys_sema);
       break;
     }
     case SYS_EXEC: {
@@ -99,7 +105,9 @@ void syscall_handler(struct intr_frame *f) {
       break;
     }
     case SYS_CREATE: {
+      sema_down(&sys_sema);
       f->R.rax = create((char *)f->R.rdi, f->R.rsi);
+      sema_up(&sys_sema);
       break;
     }
     case SYS_REMOVE: {
@@ -107,7 +115,9 @@ void syscall_handler(struct intr_frame *f) {
       break;
     }
     case SYS_OPEN: {
+      sema_down(&sys_sema);
       f->R.rax = open((const char *)f->R.rdi);
+      sema_up(&sys_sema);
       break;
     }
     case SYS_FILESIZE: {
@@ -115,11 +125,15 @@ void syscall_handler(struct intr_frame *f) {
       break;
     }
     case SYS_READ: {
+      sema_down(&sys_sema);
       f->R.rax = read((int)f->R.rdi, (void *)f->R.rsi, (unsigned)f->R.rdx);
+      sema_up(&sys_sema);
       break;
     }
     case SYS_WRITE: {
+      sema_down(&sys_sema);
       f->R.rax = write((int)f->R.rdi, (void *)f->R.rsi, (unsigned)f->R.rdx);
+      sema_up(&sys_sema);
       break;
     }
     case SYS_SEEK: {
@@ -139,11 +153,15 @@ void syscall_handler(struct intr_frame *f) {
       break;
     }
     case SYS_MMAP: {
+      sema_down(&sys_sema);
       f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+      sema_up(&sys_sema);
       break;
     }
     case SYS_MUNMAP: {
+      sema_down(&sys_sema);
       munmap(f->R.rdi);
+      sema_up(&sys_sema);
       break;
     }
     default:
