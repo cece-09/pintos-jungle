@@ -332,11 +332,6 @@ void process_exit(void) {
   /* Clean up pml4 */
   process_cleanup();
 
-  /* If sema value is 0, up. */
-  if(filesys_sema.value == 0) {
-    sema_up(&filesys_sema);
-  }
-
   /* Let parent process run. */
   if (curr->parent) {
     child = thread_get_child(&curr->parent->children, curr->tid);
