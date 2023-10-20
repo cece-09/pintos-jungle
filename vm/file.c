@@ -80,6 +80,7 @@ static bool file_backed_swap_out(struct page *page) {
   }
 
   /* Clear from pml4, mark as unpresent. */
+  pml4_set_dirty(curr->pml4, page->va, false);
   pml4_clear_page(curr->pml4, page->va);
   page->flags = page->flags & ~PTE_P;
   page->frame = NULL;

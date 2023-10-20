@@ -9,7 +9,7 @@ syscall_entry:
     /* RIP relative addressing. */
 	movq %rbx, temp1(%rip)     /* %rbx, %r12를 temp1, temp2에 백업 */
 	movq %r12, temp2(%rip)     /* callee saved registers */
-	movq %rsp, %rbx            /* Store userland rsp    */
+	movq %rsp, %rbx            /* Store userland rsp */
 	movabs $tss, %r12          /* Store tss address */
 	movq (%r12), %r12          /* Store tss */
 	movq 4(%r12), %rsp         /* Read ring0 rsp from the tss */

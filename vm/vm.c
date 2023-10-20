@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 
-
 #include "threads/malloc.h"
 #include "threads/mmu.h"
 #include "threads/pte.h"
@@ -18,7 +17,6 @@ static void spt_free_page(struct hash_elem *, void *);
 static void spt_copy_page(struct hash_elem *, void *);
 
 static struct list frame_table;
-
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -86,7 +84,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
   /* Check wheter the upage is already occupied or not. */
   if (spt_find_page(spt, upage) == NULL) {
     page = calloc(1, sizeof(struct page));
-    if(page == NULL) PANIC("Out of memory.\n");
+    if (page == NULL) PANIC("Out of memory.\n");
 
     /* If upage is not a stack. */
     switch (type) {
@@ -155,15 +153,23 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page) {
 
 /* Get the struct frame, that will be evicted. */
 static struct frame *vm_get_victim(void) {
-  struct frame *victim = NULL;
-  /* TODO: The policy for eviction is up to you. */
-  
-  if(list_empty(&frame_table)) {
+  struct thread *curr = thread_current();
+
+  if (list_empty(&frame_table)) {
     PANIC("No entry in frame table!!!");
   }
 
-  victim = list_entry(list_pop_front(&frame_table), struct frame, elem);
+  struct list_elem *next = list_pop_front(&frame_table);
+  struct frame *victim = list_entry(next, struct frame, elem);
 
+  while (pml4_is_accessed(curr->pml4, victim->page->va)) {
+    pml4_set_accessed(curr->pml4, victim->page->va, false);
+    list_push_back(&frame_table, &victim->elem);
+
+    /* Next candidate. */
+    next = list_pop_front(&frame_table);
+    victim = list_entry(next, struct frame, elem);
+  }
 
   return victim;
 }
@@ -173,7 +179,7 @@ static struct frame *vm_get_victim(void) {
 static struct frame *vm_evict_frame(void) {
   struct frame *victim = vm_get_victim();
   /* TODO: swap out the victim and return the evicted frame. */
-  if(swap_out(victim->page)) {
+  if (swap_out(victim->page)) {
     memset(victim->kva, 0, PGSIZE);
     return victim;
   }
@@ -225,15 +231,16 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
-    struct supplemental_page_table *spt = &thread_current()->spt;
+  struct thread *curr = thread_current();
+  struct supplemental_page_table *spt = &curr->spt;
   void *upage = pg_round_down(addr);
-  void *curr_rsp = (void *)f->rsp;
+  void *curr_rsp = user ? (void *)f->rsp : curr->user_rsp;
 
-  /* Validate stack overflow. */
+  /* Validate stack growth. */
   if (STACK_LIMIT < addr && addr < spt->stack_bottom) {
-    /* If current stack is not full, not a stack overflow. */
+    /* If current stack is not full, not a stack growth. */
     if (curr_rsp != addr) return false;
-    /* If stack overflow */
+    /* If stack growth */
     return vm_stack_growth(upage);
   }
 

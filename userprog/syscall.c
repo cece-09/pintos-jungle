@@ -74,6 +74,9 @@ void syscall_init(void) {
 
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f) {
+  struct thread *curr = thread_current();
+  curr->user_rsp = (void*)f->rsp;
+
   switch (f->R.rax) {
     case SYS_HALT: {
       halt();
