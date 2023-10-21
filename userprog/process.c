@@ -282,13 +282,18 @@ int process_wait(tid_t child_tid) {
 
   /* If child_tid is invalid, return error */
   child = thread_get_child(&parent->children, child_tid);
-  if (child == NULL) return -1;
+  if (child == NULL) {
+    return -1;
+  }
 
   /* Block parent until child exit. */
   do {
     /* If child exit, remove from list and return. */
     if (child->status == CHILD_EXIT) {
       rtn = child->rtn_value;
+    //   if(rtn != 0x42) {
+    //     printf("🔥 tid %d \n", child->tid);
+    //   }
       list_remove(&child->elem);
       sema_init(&parent->wait_sema, 0);
       free(child);
@@ -297,6 +302,7 @@ int process_wait(tid_t child_tid) {
     /* Wait for child_tid to exit. */
     sema_down(&parent->wait_sema);
   } while (child);
+  NOT_REACHED();
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -313,10 +319,12 @@ void process_exit(void) {
   /* Close exec file. */
   exec_file_cleanup();
 
+  sema_down(&file_sema);
+
   /* If current is user process, */
   if (curr->task == USER_TASK) {
     /* Print termination message. */
-    printf("%s: exit(%lld)\n", curr->name, curr->exit_code);
+    printf("%s: (%d) exit(%lld)\n", curr->name, curr->tid, curr->exit_code);
   }
 
   /* Clean up pml4 */
@@ -328,9 +336,10 @@ void process_exit(void) {
     if (child) {
       child->status = CHILD_EXIT;
       child->rtn_value = curr->exit_code;
+      sema_up(&curr->parent->wait_sema);
     }
-    sema_up(&curr->parent->wait_sema);
   }
+  sema_up(&file_sema);
 }
 
 /* Clear file sema. This function is called
@@ -831,12 +840,14 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 static bool lazy_load_segment(struct page *page, void *aux) {
   struct thread *curr = thread_current();
   void *upage = page->va;
+  sema_down(&file_sema);
 
   /* Get a page of memory. */
   struct frame *frame = page->frame;
   void *kva = frame->kva;
   if (frame == NULL || kva == NULL) {
     printf("process.c:827 No frame is allocated.\n");
+    sema_up(&file_sema);
     return false;
   }
 
@@ -847,17 +858,16 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   off_t ofs = file_info->ofs;
 
   /* Load this page. */
-  sema_down(&file_sema);
   file_seek(file, ofs);
   if (file_read(file, kva, bytes) != (int)bytes) {
     printf("process.c:838 File is not read properly.\n");
     sema_up(&file_sema);
     return false;
   }
-  sema_up(&file_sema);
 
   /* Free file info. */
   free(file_info);
+  sema_up(&file_sema);
   return true;
 }
 

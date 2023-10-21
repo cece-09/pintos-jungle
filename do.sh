@@ -72,7 +72,7 @@ PT_WRITE_CODE="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/pt-write-code
 PT_WRITE_CODE2="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/pt-write-code2:pt-write-code2 -p ../../tests/vm/sample.txt:sample.txt --swap-disk=4 -- -q   -f run pt-write-code2"
 PT_GROW_STK="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/pt-grow-stk-sc:pt-grow-stk-sc --swap-disk=4 -- -q   -f run pt-grow-stk-sc"
 PAGE_LINEAR="pintos -v -k -T 300 -m 20   --fs-disk=10 -p tests/vm/page-linear:page-linear --swap-disk=4 -- -q   -f run page-linear"
-PAGE_PARALLEL="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/page-parallel:page-parallel -p tests/vm/child-linear:child-linear --swap-disk=4 -- -q   -f run page-parallel"
+PAGE_PARALLEL="pintos -v -k -m 20 --fs-disk=10 -p tests/vm/page-parallel:page-parallel -p tests/vm/child-linear:child-linear --swap-disk=4 -- -q   -f run page-parallel"
 PAGE_MERGE_SEQ="pintos -v -k -T 600 -m 20   --fs-disk=10 -p tests/vm/page-merge-seq:page-merge-seq -p tests/vm/child-sort:child-sort --swap-disk=4 -- -q   -f run page-merge-seq"
 PAGE_MERGE_PAR="pintos -v -k -T 600 -m 20   --fs-disk=10 -p tests/vm/page-merge-par:page-merge-par -p tests/vm/child-sort:child-sort --swap-disk=10 -- -q   -f run page-merge-par"
 PAGE_MERGE_STK="pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/vm/page-merge-stk:page-merge-stk -p tests/vm/child-qsort:child-qsort --swap-disk=10 -- -q   -f run page-merge-stk"
@@ -153,4 +153,11 @@ make
 cd build
 source ../../activate
 
+
+# SYNCH
+$PAGE_LINEAR
 $PAGE_PARALLEL
+$PAGE_MERGE_PAR
+$PAGE_MERGE_SEQ
+$PAGE_MERGE_STK
+$PAGE_MERGE_MM

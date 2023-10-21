@@ -100,8 +100,10 @@ void syscall_handler(struct intr_frame *f) {
                           .a5 = f->R.r8,
                           .a6 = f->R.r9,
                           .intr = f};
-
+  
+//   sema_down(&sys_sema);
   f->R.rax = syscall[num](args);
+  if(!sys_sema.value) sema_up(&sys_sema);
   return;
 }
 
@@ -113,11 +115,8 @@ uint64_t halt(struct sys_args args) {
 
 /* Terminate current process. */
 uint64_t exit(struct sys_args args) {
-  sema_down(&sys_sema);
   int status = (int)args.a1;
-//   printf("🔥 %s: exit status: %d\n", thread_current()->name, status);
   thread_current()->exit_code = status;
-  sema_up(&sys_sema);
   thread_exit();
 }
 
@@ -367,9 +366,10 @@ uint64_t fork(struct sys_args args) {
   }
 
   tid_t rtn;
-  sema_down(&sys_sema);
-  rtn = process_fork(thread_name, user_if);
   sema_up(&sys_sema);
+  //   // sema_down(&sys_sema);
+  rtn = process_fork(thread_name, user_if);
+  //   // sema_up(&sys_sema);
   return (uint64_t)rtn;
 }
 
@@ -377,8 +377,9 @@ uint64_t fork(struct sys_args args) {
 uint64_t wait(struct sys_args args) {
   tid_t tid = (tid_t)args.a1;
   ASSERT(tid >= 0);
+  sema_up(&sys_sema);
 
-  return (uint64_t)process_wait(tid);;
+  return (uint64_t)process_wait(tid);
 }
 
 /* Execute process. */
@@ -530,12 +531,12 @@ static void free_fd(int fd) {
  * Returns false if page is copy-on-write. */
 static bool pg_write_protect(void *va, size_t size) {
   struct thread *curr = thread_current();
-  
+
   /* From va to va + size. */
   for (void *p = va; p < va + size; p += PGSIZE) {
     uint64_t *pte = pml4e_walk(curr->pml4, pg_round_down(p), 0);
     if (*pte != NULL && !is_writable(pte)) {
-      struct page* page = spt_find_page(&curr->spt, va);
+      struct page *page = spt_find_page(&curr->spt, va);
       return !vm_handle_wp(page);
     }
   }

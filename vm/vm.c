@@ -10,6 +10,7 @@
 #include "threads/vaddr.h"
 #include "vm/inspect.h"
 
+static struct semaphore fault_sema;
 static uint64_t spt_hash_func(const struct hash_elem *, void *);
 static bool spt_hash_less_func(const struct hash_elem *,
                                const struct hash_elem *, void *);
@@ -30,6 +31,7 @@ void vm_init(void) {
   /* DO NOT MODIFY UPPER LINES. */
 
   list_init(&frame_table);
+  sema_init(&fault_sema, 1);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -56,7 +58,7 @@ bool install_page(struct page *page) {
   bool writable = pg_writable(page);
   void *kva = page->frame->kva;
   ASSERT(page && kva)
-  
+
   // TODO: logic 수정
   //   if ((pml4_get_page(curr->pml4, page->va) == NULL) &&
   //       pml4_set_page(curr->pml4, page->va, kva, writable)) {
@@ -125,20 +127,16 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va) {
   spt_elem = hash_find(&spt->hash, &tmp.elem);
   if (spt_elem == NULL) return NULL;
 
-  page = hash_entry(spt_elem, struct page, elem);
-  return page;
+  return hash_entry(spt_elem, struct page, elem);
 }
 
 /* Insert PAGE into spt with validation. */
 bool spt_insert_page(struct supplemental_page_table *spt, struct page *page) {
-  int succ = false;
-
   /* Function hash_insert returns old hash elem. */
   if (!hash_insert(&spt->hash, &page->elem)) {
-    succ = true;
+    return true;
   }
-
-  return succ;
+  return false;
 }
 
 /* Remove page in spt. */
@@ -258,9 +256,7 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
 
   /* Else, search for page in spt. */
   struct page *page = spt_find_page(spt, addr);
-  if (page == NULL) {
-    return false;
-  }
+  if (page == NULL) return false;
 
   /* If page is write-protect, return handle_wp. */
   if (write && !pg_writable(page)) {

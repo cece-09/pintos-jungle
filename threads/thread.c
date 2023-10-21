@@ -174,9 +174,9 @@ void thread_print_stats(void) {
 /* Create a new thread. */
 tid_t thread_create(const char *name, int priority, thread_func *function,
                     void *aux) {
-  struct thread_child *child;
-  struct thread *t;
   tid_t tid;
+  struct thread *t;
+  struct thread_child *child;
 
   ASSERT(function != NULL);
 

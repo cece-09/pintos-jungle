@@ -113,6 +113,6 @@ static void anon_destroy(struct page *page) {
       free(page->frame);
     }
   }
-  
+
   return;
 }
