@@ -147,33 +147,32 @@ struct thread {
   char name[16];             /* Name (for debugging purposes). */
   enum thread_status status; /* Thread state. */
 
-  int priority;            /* 나의 priority */
-  uint8_t donate_list[64]; /* 기증받은 priority */
-  struct thread *holder;   /* 내가 donate했던 애 */
+  int priority;            /* Original priority. */
+  uint8_t donate_list[64]; /* Priority donation list. */
+  struct thread *holder;   /* Holder of lock this thread is blocked by. */
 
-  int nice;       /* for mlfqs */
-  int recent_cpu; /* for mlfqs */
+  int nice;       /* For mlfqs. */
+  int recent_cpu; /* For mlfqs. */
 
   struct list_elem elem;   /* List element. */
-  struct list_elem a_elem; /* All thread list */
+  struct list_elem a_elem; /* All thread list. */
 
-  uint64_t wake_tick; /* Wake Tick */
+  uint64_t wake_tick; /* Wake tick. */
 
   // #ifdef USERPROG
   /* Owned by userprog/process.c. */
-  uint8_t mode;           /* Kernel thread or User process */
-  uint64_t *pml4;         /* Page map level 4 */
-  struct file **fdt;      /* File descriptor table */
-  struct file *exec_file; /* User process's exec_file */
+  uint8_t task;           /* Kernel thread or User process. */
+  uint64_t *pml4;         /* Page map level 4. */
+  struct file **fdt;      /* File descriptor table. */
+  struct file *exec_file; /* User process's exec_file. */
 
   struct thread *parent;
   struct list children;
-  struct semaphore fork_sema; /* Used for process fork */
-  struct semaphore wait_sema; /* Used for process fork */
+  struct semaphore fork_sema; /* Used for process fork. */
+  struct semaphore wait_sema; /* Used for process wait. */
 
-  uint64_t exit_code; /* Return value of child */
-
-  struct intr_frame fork_tf; /* Context to fork  */
+  uint64_t exit_code;        /* Return value of child. */
+  struct intr_frame fork_tf; /* Context to fork.  */
   // #endif
 
 #ifdef VM
@@ -183,7 +182,7 @@ struct thread {
 #endif
 
   /* Owned by thread.c. */
-  struct intr_frame tf; /* Information for switching */
+  struct intr_frame tf; /* Information for switching. */
   unsigned magic;       /* Detects stack overflow. */
 };
 
@@ -211,39 +210,35 @@ const char *thread_name(void);
 void thread_exit(void) NO_RETURN;
 void thread_yield(void);
 
-/* for thread sleep */
+/* Thread sleep. */
 void thread_sleep(uint64_t ticks);
 void thread_wake(uint64_t ticks);
 
-/* priority */
+/* Priority. */
 int thread_get_priority(void);
 void thread_set_priority(int);
 void thread_reorder(struct thread *);
 int get_priority(struct thread *);
 void thread_set_recent_cpu(void);
 
-/* mlfq */
+/* Multilevel feedback queue. */
 int thread_get_nice(void);
-void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
-void thread_set_load_avg(void);
 int get_recent_cpu(struct thread *);
+void thread_set_nice(int);
 void set_recent_cpu(struct thread *);
+void thread_set_load_avg(void);
 void thread_incr_recent_cpu(void);
-int calc_priority(struct thread *);
 void thread_reset_priority(void);
 
-/* list cmp funtcions */
+/* List compare funtcions. */
 bool less_tick(struct list_elem *, struct list_elem *, void *);
 bool high_prio(struct list_elem *, struct list_elem *, void *);
 bool high_sema(struct list_elem *, struct list_elem *, void *);
 bool less_recent(struct list_elem *, struct list_elem *, void *);
 
 void do_iret(struct intr_frame *tf);
-
-/* iterate */
-void iterate_recent_cpu(struct list_elem *, void *);
 
 /* Get child info. */
 struct thread_child *thread_get_child(struct list *, tid_t);

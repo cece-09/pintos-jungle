@@ -34,8 +34,6 @@ void file_deny_write(struct file *);
 void file_allow_write(struct file *);
 int file_writable(struct file *);
 
-/* Get file inode. */
-struct lock *file_inode_lock(struct file *);
 
 /* File position. */
 void file_seek(struct file *, off_t);

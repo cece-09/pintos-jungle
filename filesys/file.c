@@ -141,18 +141,3 @@ off_t file_tell(struct file *file) {
   ASSERT(file != NULL);
   return file->pos;
 }
-
-/* Returns if file is writable */
-int file_writable(struct file *file) {
-  ASSERT(file != NULL);
-  if (file->deny_write)
-    return 0;
-  else
-    return 1;
-}
-
-/* Returns file inode */
-struct lock *file_inode_lock(struct file *file) {
-  ASSERT(file != NULL)
-  return inode_lock(file->inode);
-}

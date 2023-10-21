@@ -16,7 +16,7 @@ static struct page *spt_get_head(struct page *page);
 static struct file_page *get_file_page(struct page *page);
 
 /* Control lazy load order. */
-static struct lock filesys_lock;
+static struct semaphore file_sema;
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations file_ops = {
@@ -29,7 +29,7 @@ static const struct page_operations file_ops = {
 /* The initializer of file vm */
 void vm_file_init(void) {
   /* Init filesys lock. */
-  lock_init(&filesys_lock);
+  sema_init(&file_sema, 1);
 }
 
 /* Initialize the file backed page */
@@ -67,9 +67,9 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
   bool succ;
 
   /* Read from file to kva. */
-//   lock_acquire(&filesys_lock);
+  sema_down(&file_sema);
   succ = do_page_read_write(page, head, file_read);
-//   lock_release(&filesys_lock);
+  sema_up(&file_sema);
   if (!succ) return false;
 
   /* Install in pml4, mark as present. */
@@ -86,9 +86,9 @@ static bool file_backed_swap_out(struct page *page) {
 
   bool succ;
 
-//   lock_acquire(&filesys_lock);
+  sema_down(&file_sema);
   succ = file_write_back(page, head);
-//   lock_release(&filesys_lock);
+  sema_up(&file_sema);
   if (!succ) return false;
 
   /* Clear from pml4, mark as unpresent. */
@@ -198,6 +198,14 @@ void spt_file_writeback(struct hash_elem *e, void *aux) {
   file_write_back_all(page);
 }
 
+/* Clear file sema. This function is called
+ * when page fault exception occurs. */
+void clear_vm_file_sema(void) {
+  if (file_sema.value == 0) {
+    sema_up(&file_sema);
+  }
+}
+
 /* Initialize file-backed frame. */
 static bool lazy_load_file(struct page *page, void *aux) {
   ASSERT(page->operations->type == VM_FILE)
@@ -210,9 +218,9 @@ static bool lazy_load_file(struct page *page, void *aux) {
 
   /* Read file to page. */
   bool succ;
-//   lock_acquire(&filesys_lock);
+  sema_down(&file_sema);
   succ = do_page_read_write(page, head, file_read);
-//   lock_release(&filesys_lock);
+  sema_up(&file_sema);
 
   return succ;
 }
@@ -226,8 +234,6 @@ static void file_write_back_all(struct page *head) {
   struct page *page = head;
 
   while (page && get_file_page(page)->map_addr == map_addr) {
-    /* Mark as written back. */
-    page->flags = page->flags | PG_WB;
 
     if (!pg_present(page)) {
       /* Clearing uninit page will be handled by uninit_destroy.
@@ -337,5 +343,8 @@ static struct page *spt_get_head(struct page *page) {
 /* Get file_page struct. */
 static struct file_page *get_file_page(struct page *page) {
   ASSERT(page_get_type(page) == VM_FILE)
-  return page->operations->type == VM_FILE ? &page->file : page->uninit.aux;
+  if(page->operations->type == VM_FILE) {
+    return &page->file;
+  }
+  return page->uninit.aux;
 }

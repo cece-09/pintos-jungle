@@ -22,6 +22,4 @@ void inode_deny_write(struct inode *);
 void inode_allow_write(struct inode *);
 off_t inode_length(const struct inode *);
 
-struct lock *inode_lock(struct inode *);
-
 #endif /* filesys/inode.h */

@@ -35,7 +35,6 @@ struct inode {
   bool removed;           /* True if deleted, false otherwise. */
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
   struct inode_disk data; /* Inode content. */
-  struct lock lock;       /* Access lock */
 };
 
 /* Returns the disk sector that contains byte offset POS within
@@ -120,7 +119,6 @@ struct inode *inode_open(disk_sector_t sector) {
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
-  lock_init(&inode->lock);  // TODO:
   disk_read(filesys_disk, inode->sector, &inode->data);
 
   return inode;
@@ -289,9 +287,3 @@ void inode_allow_write(struct inode *inode) {
 
 /* Returns the length, in bytes, of INODE's data. */
 off_t inode_length(const struct inode *inode) { return inode->data.length; }
-
-/* Return inode lock */
-struct lock *inode_lock(struct inode *inode) {
-  ASSERT(inode != NULL);
-  return &inode->lock;
-}

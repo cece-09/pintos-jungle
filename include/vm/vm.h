@@ -44,12 +44,9 @@ struct thread;
 
 #define VM_TYPE(type) ((type) & 7)
 
-#define PG_WB 0x80
-
 /* Check page flag bits. */
 #define pg_writable(page) ((page->flags & PTE_W ) != 0)
 #define pg_present(page) ((page->flags & PTE_P ) != 0)
-#define pg_writeback(page) ((page->flags & PG_WB) != 0)
 
 /* Absolute stack limit. */
 #define STACK_LIMIT (USER_STACK - (1 << 20))
@@ -112,11 +109,6 @@ struct supplemental_page_table {
   struct hash hash;
 };
 
-/* Swap table structure. */
-struct swap_page_table {
-
-};
-
 /* Exec file info for loading segment. */
 struct file_info {
   struct file* file;
@@ -147,7 +139,8 @@ void vm_dealloc_page(struct page *page);
 bool vm_claim_page(void *va);
 enum vm_type page_get_type(struct page *page);
 
-/* Install page. */
+/* New functions. */
 bool install_page(struct page *page);
+void clear_vm_file_sema(void);
 
 #endif /* VM_VM_H */

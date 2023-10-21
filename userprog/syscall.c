@@ -14,7 +14,6 @@
 #include "threads/mmu.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
-#include "threads/thread.h"
 #include "userprog/gdt.h"
 #include "userprog/process.h"
 #include "vm/file.h"
@@ -46,14 +45,14 @@ static void error_exit(int exit_code);
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
+/* Syscall table. */
 typedef uint64_t (*sys_func)(struct sys_args);
 static sys_func syscall[24];
 #define zero (uint64_t)0
 #define error (uint64_t)(-1)
 
 /* Filesys lock. */
-static struct lock filesys_lock;
-static struct semaphore filesys_sema;
+static struct semaphore sys_sema;
 
 /* Init syscall. */
 void syscall_init(void) {
@@ -85,8 +84,7 @@ void syscall_init(void) {
   syscall[SYS_MUNMAP] = munmap;
   syscall[SYS_DUP2] = dup2;
 
-  lock_init(&filesys_lock);
-  sema_init(&filesys_sema, 1);
+  sema_init(&sys_sema, 1);
 }
 
 /* The main system call interface */
@@ -103,9 +101,7 @@ void syscall_handler(struct intr_frame *f) {
                           .a6 = f->R.r9,
                           .intr = f};
 
-  //   sema_down(&filesys_sema);
   f->R.rax = syscall[num](args);
-  //   sema_up(&filesys_sema);
   return;
 }
 
@@ -127,49 +123,54 @@ uint64_t create(struct sys_args args) {
   const char *file = (const char *)args.a1;
   unsigned initial_size = (unsigned)args.a2;
 
-  if (!is_valid_ptr(file)) error_exit(-1);
+  if (!is_valid_ptr(file)) {
+    error_exit(-1);
+  }
 
   bool rtn;
-  sema_down(&filesys_sema);
+  sema_down(&sys_sema);
   rtn = filesys_create(file, initial_size);
-  sema_up(&filesys_sema);
+  sema_up(&sys_sema);
   return (uint64_t)rtn;
 }
 
 /* Open a new file. */
 uint64_t open(struct sys_args args) {
   const char *file_name = (const char *)args.a1;
+  if (!is_valid_ptr(file_name)) {
+    error_exit(-1);
+  }
 
-  if (!is_valid_ptr(file_name)) error_exit(-1);
-
-  sema_down(&filesys_sema);
-  if (file_name == NULL) goto err;
-
+  sema_down(&sys_sema);
   struct thread *curr = thread_current();
+
   int fd = allocate_fd();
-  if (!is_valid_fd(fd)) goto err;
+  if (!is_valid_fd(fd)) {
+    goto err;
+  }
 
   struct file *file = filesys_open(file_name);
-
   if (file == NULL) {
     free_fd(fd);
     goto err;
   }
 
   curr->fdt[fd] = file;
-  sema_up(&filesys_sema);
+  sema_up(&sys_sema);
   return (uint64_t)fd;
 err:
-  sema_up(&filesys_sema);
+  sema_up(&sys_sema);
   return error;
 }
 
 /* Close a file. */
 uint64_t close(struct sys_args args) {
+  struct file **fdt = thread_current()->fdt;
   int fd = (int)args.a1;
 
-  if (!is_valid_fd(fd)) return zero;
-  struct file **fdt = thread_current()->fdt;
+  if (!is_valid_fd(fd)) {
+    return zero;
+  }
 
   /* Standard I/O */
   if (fdt[fd] == OPEN_STDIN) {
@@ -180,12 +181,15 @@ uint64_t close(struct sys_args args) {
     fdt[fd] = CLOSE_STDOUT;
     return zero;
   }
-
-  if (is_file_std(fdt[fd])) return zero;
+  if (is_file_std(fdt[fd])) {
+    return zero;
+  }
 
   /* Close file. */
   struct file *file = fdt[fd];
-  if (file == NULL) return zero;
+  if (file == NULL) {
+    return zero;
+  }
 
   /* Remove from fd list. */
   if (file->dup_cnt > 0) {
@@ -196,7 +200,9 @@ uint64_t close(struct sys_args args) {
   }
 
   free_fd(fd);
+  sema_down(&sys_sema);
   file_close(file);
+  sema_up(&sys_sema);
 }
 
 /* Read from file to buffer. */
@@ -204,38 +210,46 @@ uint64_t read(struct sys_args args) {
   int fd = (int)args.a1;
   void *buffer = (void *)args.a2;
   unsigned size = (unsigned)args.a3;
-  sema_down(&filesys_sema);
 
-  if (!is_valid_ptr(buffer)) goto err_exit;
+  /* If ptr is not valid, exit. */
+  if (!is_valid_ptr(buffer)) {
+    error_exit(-1);
+  }
 
   /* If page is write-protect, exit. */
-  if (pg_write_protect(buffer, size)) goto err_exit;
+  if (pg_write_protect(buffer, size)) {
+    error_exit(-1);
+  }
 
-  if (!is_valid_fd(fd)) goto err;
+  /* If fd is not valid, return error. */
+  if (!is_valid_fd(fd)) {
+    return error;
+  }
+
+  sema_down(&sys_sema);
   struct file **fdt = thread_current()->fdt;
 
   /* Standard I/O */
   if (is_file_std(fdt[fd])) {
     if (fdt[fd] == OPEN_STDIN) {
-      sema_up(&filesys_sema);
+      sema_up(&sys_sema);
       return input_getc();
     } else
       goto err;
   }
 
+  /* Normal file. */
   struct file *file = fdt[fd];
-  if (file == NULL) goto err_exit;
+  if (file == NULL) {
+    goto err;
+  }
 
   int rtn = file_read(file, buffer, size);
-  sema_up(&filesys_sema);
+  sema_up(&sys_sema);
   return (uint64_t)rtn;
-
 err:
-  sema_up(&filesys_sema);
+  sema_up(&sys_sema);
   return error;
-err_exit:
-  sema_up(&filesys_sema);
-  error_exit(-1);
 }
 
 /* Write from buffer to file. */
@@ -243,36 +257,41 @@ uint64_t write(struct sys_args args) {
   int fd = (int)args.a1;
   const void *buffer = (const void *)args.a2;
   unsigned size = (unsigned)args.a3;
-  sema_down(&filesys_sema);
 
-  if (!is_valid_ptr(buffer)) goto err_exit;
-  if (!is_valid_fd(fd)) goto err;
+  /* If ptr is not valid, exit. */
+  if (!is_valid_ptr(buffer)) {
+    error_exit(-1);
+  }
+
+  /* If fd is not valid, return error. */
+  if (!is_valid_fd(fd)) {
+    return error;
+  }
+
+  sema_down(&sys_sema);
   struct file **fdt = thread_current()->fdt;
 
   /* Standard I/O */
   if (is_file_std(fdt[fd])) {
     if (fdt[fd] == OPEN_STDOUT) {
       putbuf((char *)buffer, size);
-      sema_up(&filesys_sema);
+      sema_up(&sys_sema);
       return (uint64_t)size;
     } else
       goto err;
   }
 
   struct file *file = fdt[fd];
-  if (file == NULL || !file_writable(file)) {
+  if (file == NULL || file->deny_write) {
     goto err;
   }
 
   int rtn = file_write(file, buffer, size);
-  sema_up(&filesys_sema);
+  sema_up(&sys_sema);
   return (uint64_t)rtn;
 err:
-  sema_up(&filesys_sema);
+  sema_up(&sys_sema);
   return error;
-err_exit:
-  sema_up(&filesys_sema);
-  error_exit(-1);
 }
 
 /* Duplicate file of oldfd to newfd. */
@@ -280,13 +299,21 @@ uint64_t dup2(struct sys_args args) {
   int oldfd = (int)args.a1;
   int newfd = (int)args.a2;
 
-  if (!is_valid_fd(oldfd)) return error;
-  if (!is_valid_fd(newfd)) return error;
+  /* If invalid fd, return error. */
+  if (!is_valid_fd(oldfd) || !is_valid_fd(newfd)) {
+    return error;
+  }
 
+  /* If same fd, return newfd. */
+  if (oldfd == newfd) {
+    return (uint64_t)newfd;
+  }
+
+  /* If oldfd has no fild, return error. */
   struct file **fdt = thread_current()->fdt;
-
-  if (oldfd == newfd) return (uint64_t)newfd;
-  if (fdt[oldfd] == NULL) return error;
+  if (fdt[oldfd] == NULL) {
+    return error;
+  }
 
   /* If newfd already has a file, close. */
   if (fdt[newfd]) {
@@ -310,27 +337,36 @@ uint64_t dup2(struct sys_args args) {
 /* Return filesize. */
 uint64_t filesize(struct sys_args args) {
   int fd = (int)args.a1;
+  if (!is_valid_fd(fd)) {
+    return error;
+  }
 
-  if (!is_valid_fd(fd)) return error;
   struct file **fdt = thread_current()->fdt;
-  if (fdt[fd] == NULL) return error;
-  if (is_file_std(fdt[fd])) return error;
+  if (fdt[fd] == NULL || is_file_std(fdt[fd])) {
+    return error;
+  }
 
-  return (uint64_t)file_length(fdt[fd]);
+  off_t rtn;
+  sema_down(&sys_sema);
+  rtn = file_length(fdt[fd]);
+  sema_up(&sys_sema);
+  return (uint64_t)rtn;
 }
 
 /* Fork a child process. */
 uint64_t fork(struct sys_args args) {
   const char *thread_name = (const char *)args.a1;
   struct intr_frame *user_if = (struct intr_frame *)args.intr;
-
-  if (!is_valid_ptr(thread_name)) error_exit(-1);
   ASSERT(user_if);
 
+  if (!is_valid_ptr(thread_name)) {
+    error_exit(-1);
+  }
+
   tid_t rtn;
-  sema_down(&filesys_sema);
+  sema_down(&sys_sema);
   rtn = process_fork(thread_name, user_if);
-  sema_up(&filesys_sema);
+  sema_up(&sys_sema);
   return (uint64_t)rtn;
 }
 
@@ -339,17 +375,15 @@ uint64_t wait(struct sys_args args) {
   tid_t tid = (tid_t)args.a1;
   ASSERT(tid >= 0);
 
-  int rtn;
-  //   sema_down(&filesys_sema);
-  rtn = process_wait(tid);
-  //   sema_up(&filesys_sema);
-  return rtn;
+  return (uint64_t)process_wait(tid);
 }
 
 /* Execute process. */
 uint64_t exec(struct sys_args args) {
   const char *cmd_line = (const char *)args.a1;
-  if (!is_valid_ptr(cmd_line)) error_exit(-1);
+  if (!is_valid_ptr(cmd_line)) {
+    error_exit(-1);
+  }
 
   /* Copy cmd line. */
   const char *cmd_copy = palloc_get_page(0);
@@ -363,62 +397,89 @@ uint64_t exec(struct sys_args args) {
 /* Remove file. */
 uint64_t remove(struct sys_args args) {
   const char *file = (const char *)args.a1;
-  if (!is_valid_ptr(file)) error_exit(-1);
-  if (file == NULL) return zero;
+  if (!is_valid_ptr(file)) {
+    error_exit(-1);
+  }
 
-  return (uint64_t)filesys_remove(file);
+  /* If there's no file to remove, return 0. */
+  if (file == NULL) {
+    return zero;
+  }
+
+  bool rtn;
+  sema_down(&sys_sema);
+  rtn = filesys_remove(file);
+  sema_up(&sys_sema);
+  return (uint64_t)rtn;
 }
 
 /* Seek file. */
 uint64_t seek(struct sys_args args) {
   int fd = (int)args.a1;
   unsigned position = (unsigned)args.a2;
+  if (!is_valid_fd(fd)) {
+    return error;
+  }
 
-  if (!is_valid_fd(fd)) return zero;
   struct file **fdt = thread_current()->fdt;
+  if (fdt[fd] == NULL || is_file_std(fdt[fd])) {
+    return error;
+  }
 
-  if (fdt[fd] == NULL) return zero;
-  if (is_file_std(fdt[fd])) return zero;
-
-  // lock_acquire(file_inode_lock(fdt[fd]));
+  sema_down(&sys_sema);
   file_seek(fdt[fd], position);
-  // lock_release(file_inode_lock(fdt[fd]));
+  sema_up(&sys_sema);
 }
 
 /* Tell file. */
 uint64_t tell(struct sys_args args) {
   int fd = (int)args.a1;
-  if (!is_valid_fd(fd)) return error;
-  struct file **fdt = thread_current()->fdt;
+  if (!is_valid_fd(fd)) {
+    return error;
+  }
 
-  if (fdt[fd] == NULL) return error;
-  if (is_file_std(fdt[fd])) return error;
+  struct file **fdt = thread_current()->fdt;
+  if (fdt[fd] == NULL || is_file_std(fdt[fd])) {
+    return error;
+  }
 
   unsigned rtn;
-  // lock_acquire(file_inode_lock(fdt[fd]));
+  sema_down(&sys_sema);
   rtn = file_tell(fdt[fd]);
-  // lock_release(file_inode_lock(fdt[fd]));
+  sema_up(&sys_sema);
   return (uint64_t)rtn;
 }
 
 /* Memory mapping. */
 uint64_t mmap(struct sys_args args) {
-  void *addr = (void *)args.a1;
-  size_t length = (size_t)args.a2;
-  int writable = (int)args.a3;
   int fd = (int)args.a4;
+  int writable = (int)args.a3;
+  void *addr = (void *)args.a1;
   off_t offset = (off_t)args.a5;
+  size_t length = (size_t)args.a2;
 
-  if (!is_valid_ptr(addr)) return zero;
-  if (!is_valid_ptr(addr + length)) return zero;
-  if (!is_valid_fd(fd)) return zero;
+  /* If ptr is not valid, return zero. */
+  if (!is_valid_ptr(addr) || !is_valid_ptr(addr + length)) {
+    return zero;
+  }
+
+  /* If there's no file, return zero. */
+  if (!is_valid_fd(fd)) {
+    return zero;
+  }
 
   struct file **fdt = thread_current()->fdt;
   struct file *file = fdt[fd];
 
-  /* Exceptions. */
-  if (is_file_std(file)) return zero;
-  if (length <= 0) return zero;
+  /* If file is standard i/o, return zero. */
+  if (is_file_std(file)) {
+    return zero;
+  }
+
+  /* If length is not positive, return zero. */
+  if ((long)length <= 0) {
+    return zero;
+  }
 
   return (uint64_t)do_mmap(addr, length, writable, file, offset);
 }
@@ -426,12 +487,23 @@ uint64_t mmap(struct sys_args args) {
 /* Unmap memory. */
 uint64_t munmap(struct sys_args args) {
   void *addr = (void *)args.a1;
-  if (!is_valid_ptr(addr)) return zero;
+  if (!is_valid_ptr(addr)) {
+    return zero;
+  }
+
   do_munmap(addr);
   return zero;
 }
 
 /* ====== Helper Functions ====== */
+
+/* Clear sema. See exception.c */
+void clear_syscall_file_sema() {
+  if (sys_sema.value == 0) {
+    sema_up(&sys_sema);
+  }
+}
+
 /* Get freed file descriptor */
 static int allocate_fd() {
   struct thread *curr = thread_current();

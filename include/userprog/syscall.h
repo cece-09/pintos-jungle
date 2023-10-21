@@ -38,5 +38,7 @@ uint64_t tell(struct sys_args);
 uint64_t mmap(struct sys_args);
 uint64_t munmap(struct sys_args);
 
+void clear_syscall_file_sema();
+
 
 #endif /* userprog/syscall.h */

@@ -29,7 +29,6 @@ void vm_init(void) {
   register_inspect_intr();
   /* DO NOT MODIFY UPPER LINES. */
 
-  /* TODO: Your code goes here. */
   list_init(&frame_table);
 }
 
@@ -46,7 +45,7 @@ enum vm_type page_get_type(struct page *page) {
   }
 }
 
-/* Helpers */
+/* Helpers. */
 static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
@@ -178,7 +177,6 @@ static struct frame *vm_get_victim(void) {
  * Return NULL on error.*/
 static struct frame *vm_evict_frame(void) {
   struct frame *victim = vm_get_victim();
-  /* TODO: swap out the victim and return the evicted frame. */
   if (swap_out(victim->page)) {
     memset(victim->kva, 0, PGSIZE);
     return victim;
@@ -397,6 +395,7 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
     default:
       break;
   }
+  
   /* Claim page if present. */
   // TODO: handle copy-on-write.
   struct frame *dsc_frame = vm_get_frame();

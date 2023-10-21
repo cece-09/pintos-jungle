@@ -7,6 +7,9 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
+#include "userprog/process.h"
+#include "vm/vm.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -144,15 +147,27 @@ static void page_fault(struct intr_frame *f) {
 
   curr = thread_current();
 
+  /* Clear all file sema. */
+  clear_process_file_sema();
+  clear_syscall_file_sema();
+  clear_vm_file_sema();
+  
+
   /* Handle exit situations. */
-  if (curr->exit_code == FORK_SUCC) {
-    /* Fault while forking process. */
-    curr->exit_code = FORK_FAIL;
-    sema_up(&curr->parent->fork_sema);
-  } else {
-    /* Else. */
-    curr->exit_code = -1;
+  switch (curr->exit_code) {
+    case FORK_SUCC:
+      /* Fault while forking process. */
+      curr->exit_code = FORK_FAIL;
+      sema_up(&curr->parent->fork_sema);
+      break;
+
+    default:
+      /* Else. */
+      curr->exit_code = -1;
+      break;
   }
+
+  /* Exit thread. */
   thread_exit();
 
   /* If the fault is true fault, show info and exit. */

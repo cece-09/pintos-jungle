@@ -31,21 +31,21 @@
 static void __do_fork(void *);
 static void initd(void *f_name);
 static void process_cleanup(void);
-static void cleanup_fdt(struct file **);
+static void exec_file_cleanup(void);
+static void fdt_cleanup(struct file **);
 static void child_list_cleanup(struct list *);
 static void duplicate_fdt(struct thread *, struct thread *);
 static bool load(const char *file_name, struct intr_frame *if_);
 
-/* Filesys lock. */
-static struct lock filesys_lock;
-static struct semaphore filesys_sema;
+/* Filesys sema. Used in process.c and vm/file.c */
+static struct semaphore file_sema;
 
 /* General process initializer for initd and other process. */
 static bool process_init(void) {
   struct thread *curr = thread_current();
 
   /* Set as user task. */
-  curr->mode = USER_TASK;
+  curr->task = USER_TASK;
 
   /* Create file descriptor table. */
   curr->fdt = palloc_get_page(PAL_ZERO);
@@ -62,6 +62,8 @@ tid_t process_create_initd(const char *file_name) {
   char *fn_copy;
   tid_t tid;
 
+  sema_init(&file_sema, 1);
+
   /* Make a copy of FILE_NAME.
    * Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page(0);
@@ -71,11 +73,6 @@ tid_t process_create_initd(const char *file_name) {
   /* Create a new thread to execute FILE_NAME. */
   char *save_ptr;
   strtok_r(file_name, " ", &save_ptr);
-
-  /* Init filesystem lock.
-   * See thread.h */
-  lock_init(&filesys_lock);
-  sema_init(&filesys_sema, 1);
 
   tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
   if (tid == TID_ERROR) palloc_free_page(fn_copy);
@@ -188,19 +185,20 @@ static void __do_fork(void *aux) {
 
   /* Duplicate page table. */
   curr->pml4 = pml4_create();
-  if (curr->pml4 == NULL) goto error;
+  if (curr->pml4 == NULL) {
+    goto error;
+  }
 
   /* Activate current process. */
   process_activate(curr);
 
   /* Duplicate exec file. */
-  // lock_acquire(&filesys_lock);
   curr->exec_file = file_duplicate(parent->exec_file);
-  // lock_release(&filesys_lock);
 
 #ifdef VM
   supplemental_page_table_init(&curr->spt);
   if (!supplemental_page_table_copy(&curr->spt, &parent->spt)) goto error;
+
 #else
   if (!pml4_for_each(parent->pml4, duplicate_pte, parent)) goto error;
 #endif
@@ -247,12 +245,7 @@ int process_exec(void *f_name) {
   process_cleanup();
 
   /* Close current exec file. */
-  if (curr->exec_file) {
-    // lock_acquire(&filesys_lock);
-    file_close(curr->exec_file);
-    // lock_release(&filesys_lock);
-    curr->exec_file = NULL;
-  }
+  exec_file_cleanup();
 
 #ifdef VM
   /* Create new spt. */
@@ -260,9 +253,9 @@ int process_exec(void *f_name) {
 #endif
 
   /* And then load the binary */
-  sema_down(&filesys_sema);
+  sema_down(&file_sema);
   success = load(file_name, &_if);
-  sema_up(&filesys_sema);
+  sema_up(&file_sema);
 
   /* If load failed, quit. */
   palloc_free_page(file_name);
@@ -315,16 +308,13 @@ void process_exit(void) {
   child_list_cleanup(&curr->children);
 
   /* Clean file descriptor table. */
-  cleanup_fdt(curr->fdt);
+  fdt_cleanup(curr->fdt);
 
-  /* Close exec_file. */
-  if (curr->exec_file) {
-    file_close(curr->exec_file);
-    curr->exec_file = NULL;
-  }
+  /* Close exec file. */
+  exec_file_cleanup();
 
   /* If current is user process, */
-  if (curr->mode == USER_TASK) {
+  if (curr->task == USER_TASK) {
     /* Print termination message. */
     printf("%s: exit(%lld)\n", curr->name, curr->exit_code);
   }
@@ -340,6 +330,23 @@ void process_exit(void) {
       child->rtn_value = curr->exit_code;
     }
     sema_up(&curr->parent->wait_sema);
+  }
+}
+
+/* Clear file sema. This function is called
+ * when page fault exception occurs. */
+void clear_process_file_sema(void) {
+  if (file_sema.value == 0) {
+    sema_up(&file_sema);
+  }
+}
+
+/* Close exec_file. */
+static void exec_file_cleanup(void) {
+  struct thread *curr = thread_current();
+  if (curr->exec_file) {
+    file_close(curr->exec_file);
+    curr->exec_file = NULL;
   }
 }
 
@@ -397,8 +404,7 @@ static void duplicate_fdt(struct thread *parent, struct thread *child) {
 }
 
 /* Clean child list.
- * Make child process orphan.
- */
+ * Make child process orphan. */
 static void child_list_cleanup(struct list *list) {
   struct list_elem *front;
   struct thread_child *child;
@@ -412,9 +418,8 @@ static void child_list_cleanup(struct list *list) {
 }
 
 /* Clean up all file descriptor table.
- * Release lock if needed.
- */
-static void cleanup_fdt(struct file **fdt) {
+ * Release lock if needed. */
+static void fdt_cleanup(struct file **fdt) {
   struct thread *curr = thread_current();
   struct lock *inode_lock;
   struct file *file;
@@ -435,11 +440,6 @@ static void cleanup_fdt(struct file **fdt) {
       continue;
     }
 
-    /* Else, release lock and close. */
-    inode_lock = file_inode_lock(file);
-    if (inode_lock->holder == curr) {
-      lock_release(inode_lock);
-    }
     file_close(file);
   }
   /* And free file descriptor table. */
@@ -847,14 +847,14 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   off_t ofs = file_info->ofs;
 
   /* Load this page. */
-  sema_down(&filesys_sema);
+  sema_down(&file_sema);
   file_seek(file, ofs);
   if (file_read(file, kva, bytes) != (int)bytes) {
     printf("process.c:838 File is not read properly.\n");
-    sema_up(&filesys_sema);
+    sema_up(&file_sema);
     return false;
   }
-  sema_up(&filesys_sema);
+  sema_up(&file_sema);
 
   /* Free file info. */
   free(file_info);
