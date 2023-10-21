@@ -15,8 +15,10 @@ test_main (void)
   for (i = 0; i < CHILD_CNT; i++) {
     children[i] = fork ("child-linear");
     if (children[i] == 0) {
-      if (exec ("child-linear") == -1)
+      if (exec ("child-linear") == -1) {
+        printf("👊 exec fail.\n");
         fail ("failed to exec child-linear");
+      }
     }
   }
   for (i = 0; i < CHILD_CNT; i++) {

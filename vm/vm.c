@@ -56,13 +56,13 @@ bool install_page(struct page *page) {
   bool writable = pg_writable(page);
   void *kva = page->frame->kva;
   ASSERT(page && kva)
-
+  
+  // TODO: logic 수정
   //   if ((pml4_get_page(curr->pml4, page->va) == NULL) &&
   //       pml4_set_page(curr->pml4, page->va, kva, writable)) {
   if (pml4_set_page(curr->pml4, page->va, kva, writable)) {
     return true;
   }
-  printf("🩵 pml4 set page fail. %p\n", page->va);
   return false;
 }
 
@@ -222,18 +222,16 @@ static bool vm_stack_growth(void *addr) {
 }
 
 /* Handle the fault on write_protected page */
-static bool vm_handle_wp(struct page *page) {
+bool vm_handle_wp(struct page *page) {
   if (!pg_copy_on_write(page)) {
     return false;
   }
 
   void *parent_kva = page->frame->kva;
-  printf("💚 %s: handle copy-on-write: %p\n", thread_current()->name, page->va);
-
+  page->flags = page->flags | PTE_W;
   page->frame = vm_get_frame();
   memcpy(page->frame->kva, parent_kva, PGSIZE);
   if (!install_page(page)) {
-    printf("💛 do claim fail??? %p\n", page->va);
     return false;
   };
 
@@ -249,9 +247,6 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   struct thread *curr = thread_current();
   struct supplemental_page_table *spt = &curr->spt;
   void *curr_rsp = user ? (void *)f->rsp : curr->user_rsp;
-
-  printf("🧡 page fault: %p %s %s\n", addr, write ? "write" : "read",
-         thread_current()->name);
 
   /* Validate stack growth. */
   if (STACK_LIMIT < addr && addr < spt->stack_bottom) {
@@ -413,15 +408,7 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
       break;
   }
 
-  /* Claim page if present. */
-  printf("💛 copy present page: %p\n", src_page->va);
-  // TODO: handle copy-on-write.
-  //   struct frame *dsc_frame = vm_get_frame();
-  //   struct frame *dsc_frame = calloc(1, sizeof(struct frame));
-  //   dsc_frame->kva = src_page->frame->kva;
-  //   ASSERT(src_page->frame->kva)
-  //   ASSERT(dsc_page->frame->kva)
-
+  /* Copy-on-write. */
   dsc_page->frame = src_page->frame;
   dsc_page->flags = dsc_page->flags & ~PTE_W;
   dsc_page->flags = dsc_page->flags | PG_COW;

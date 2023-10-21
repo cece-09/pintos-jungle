@@ -153,4 +153,4 @@ make
 cd build
 source ../../activate
 
-$COW_SIMPLE
+$PAGE_PARALLEL

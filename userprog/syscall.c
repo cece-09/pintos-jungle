@@ -113,8 +113,11 @@ uint64_t halt(struct sys_args args) {
 
 /* Terminate current process. */
 uint64_t exit(struct sys_args args) {
+  sema_down(&sys_sema);
   int status = (int)args.a1;
+//   printf("🔥 %s: exit status: %d\n", thread_current()->name, status);
   thread_current()->exit_code = status;
+  sema_up(&sys_sema);
   thread_exit();
 }
 
@@ -375,7 +378,7 @@ uint64_t wait(struct sys_args args) {
   tid_t tid = (tid_t)args.a1;
   ASSERT(tid >= 0);
 
-  return (uint64_t)process_wait(tid);
+  return (uint64_t)process_wait(tid);;
 }
 
 /* Execute process. */
@@ -523,14 +526,17 @@ static void free_fd(int fd) {
 }
 
 /* Returns if present page is writable.
- * Returns false if page is not present. */
+ * Returns false if page is not present.
+ * Returns false if page is copy-on-write. */
 static bool pg_write_protect(void *va, size_t size) {
   struct thread *curr = thread_current();
-  /* from va to va + size. */
+  
+  /* From va to va + size. */
   for (void *p = va; p < va + size; p += PGSIZE) {
     uint64_t *pte = pml4e_walk(curr->pml4, pg_round_down(p), 0);
     if (*pte != NULL && !is_writable(pte)) {
-      return true;
+      struct page* page = spt_find_page(&curr->spt, va);
+      return !vm_handle_wp(page);
     }
   }
   return false;

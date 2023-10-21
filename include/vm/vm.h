@@ -144,5 +144,6 @@ enum vm_type page_get_type(struct page *page);
 /* New functions. */
 bool install_page(struct page *page);
 void clear_vm_file_sema(void);
+bool vm_handle_wp(struct page *page);
 
 #endif /* VM_VM_H */
