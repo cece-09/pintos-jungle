@@ -57,15 +57,13 @@ bool install_page(struct page *page) {
   void *kva = page->frame->kva;
   ASSERT(page && kva)
 
-  bool success = false;
-
-  if (pml4_get_page(curr->pml4, page->va) != NULL) {
-    return false;
+  //   if ((pml4_get_page(curr->pml4, page->va) == NULL) &&
+  //       pml4_set_page(curr->pml4, page->va, kva, writable)) {
+  if (pml4_set_page(curr->pml4, page->va, kva, writable)) {
+    return true;
   }
-  if (!pml4_set_page(curr->pml4, page->va, kva, writable)) {
-    return false;
-  }
-  return true;
+  printf("🩵 pml4 set page fail. %p\n", page->va);
+  return false;
 }
 
 /* Create the pending page object with initializer. If you want to create a
@@ -224,16 +222,36 @@ static bool vm_stack_growth(void *addr) {
 }
 
 /* Handle the fault on write_protected page */
-static bool vm_handle_wp(struct page *page UNUSED) {}
+static bool vm_handle_wp(struct page *page) {
+  if (!pg_copy_on_write(page)) {
+    return false;
+  }
+
+  void *parent_kva = page->frame->kva;
+  printf("💚 %s: handle copy-on-write: %p\n", thread_current()->name, page->va);
+
+  page->frame = vm_get_frame();
+  memcpy(page->frame->kva, parent_kva, PGSIZE);
+  if (!install_page(page)) {
+    printf("💛 do claim fail??? %p\n", page->va);
+    return false;
+  };
+
+  /* Mark as no copy-on-write page. */
+  page->flags = page->flags & ~PG_COW;
+  return true;
+}
 
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
-  
+  void *upage = pg_round_down(addr);
   struct thread *curr = thread_current();
   struct supplemental_page_table *spt = &curr->spt;
-  void *upage = pg_round_down(addr);
   void *curr_rsp = user ? (void *)f->rsp : curr->user_rsp;
+
+  printf("🧡 page fault: %p %s %s\n", addr, write ? "write" : "read",
+         thread_current()->name);
 
   /* Validate stack growth. */
   if (STACK_LIMIT < addr && addr < spt->stack_bottom) {
@@ -249,10 +267,9 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
     return false;
   }
 
-  /* If page is unwritable, return false. */
+  /* If page is write-protect, return handle_wp. */
   if (write && !pg_writable(page)) {
-    /* TODO: handle copy-on-write. */
-    return false;
+    return vm_handle_wp(page);
   }
 
   /* Else, lazy loading. */
@@ -395,16 +412,18 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
     default:
       break;
   }
-  
+
   /* Claim page if present. */
+  printf("💛 copy present page: %p\n", src_page->va);
   // TODO: handle copy-on-write.
-  struct frame *dsc_frame = vm_get_frame();
-  ASSERT(src_page->frame->kva)
-  ASSERT(dsc_page->frame->kva)
+  //   struct frame *dsc_frame = vm_get_frame();
+  //   struct frame *dsc_frame = calloc(1, sizeof(struct frame));
+  //   dsc_frame->kva = src_page->frame->kva;
+  //   ASSERT(src_page->frame->kva)
+  //   ASSERT(dsc_page->frame->kva)
 
-  dsc_page->frame = dsc_frame;
-  dsc_frame->page = dsc_page;
-  memcpy(dsc_page->frame->kva, src_page->frame->kva, PGSIZE);
-
+  dsc_page->frame = src_page->frame;
+  dsc_page->flags = dsc_page->flags & ~PTE_W;
+  dsc_page->flags = dsc_page->flags | PG_COW;
   install_page(dsc_page);
 }

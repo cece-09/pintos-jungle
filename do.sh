@@ -153,4 +153,4 @@ make
 cd build
 source ../../activate
 
-$PRIORITY_DONATE_SEMA
+$COW_SIMPLE

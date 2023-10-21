@@ -106,8 +106,10 @@ static void file_backed_destroy(struct page *page) {
   /* Clear up if frame-mapped page. */
   if (pg_present(page)) {
     pml4_clear_page(curr->pml4, page->va);
-    palloc_free_page(page->frame->kva);
-    free(page->frame);
+    if (!pg_copy_on_write(page)) {
+      palloc_free_page(page->frame->kva);
+      free(page->frame);
+    }
   }
 
   return;
@@ -234,7 +236,6 @@ static void file_write_back_all(struct page *head) {
   struct page *page = head;
 
   while (page && get_file_page(page)->map_addr == map_addr) {
-
     if (!pg_present(page)) {
       /* Clearing uninit page will be handled by uninit_destroy.
        * If swap-out page, no need to write back.
@@ -343,7 +344,7 @@ static struct page *spt_get_head(struct page *page) {
 /* Get file_page struct. */
 static struct file_page *get_file_page(struct page *page) {
   ASSERT(page_get_type(page) == VM_FILE)
-  if(page->operations->type == VM_FILE) {
+  if (page->operations->type == VM_FILE) {
     return &page->file;
   }
   return page->uninit.aux;

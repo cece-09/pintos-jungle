@@ -23,8 +23,9 @@ test_main (void)
 
 	child = fork ("child");
 	if (child == 0) {
+        printf("🔥 ???00000\n");
 		CHECK (memcmp (buf, large, strlen (buf)) == 0, "check data consistency");
-
+        
 		pa_child = get_phys_addr((void*)large);
 		CHECK (pa_parent == pa_child, "two phys addrs should be the same.");
 
@@ -36,6 +37,7 @@ test_main (void)
 		return;
 	}
 	wait (child);
+    printf("🔥 ???\n");
 	CHECK (pa_parent == get_phys_addr((void*)large), "two phys addrs should be the same.");
 	CHECK (memcmp (buf, large, strlen (buf)) == 0, "check data consistency");
 	return;

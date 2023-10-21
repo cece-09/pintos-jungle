@@ -108,8 +108,11 @@ static void anon_destroy(struct page *page) {
   /* Clear up if frame-mapped page. */
   if (pg_present(page)) {
     pml4_clear_page(curr->pml4, page->va);
-    palloc_free_page(page->frame->kva);
-    free(page->frame);
+    if (!pg_copy_on_write(page)) {
+      palloc_free_page(page->frame->kva);
+      free(page->frame);
+    }
   }
+  
   return;
 }

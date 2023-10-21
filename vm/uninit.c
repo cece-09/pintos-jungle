@@ -8,12 +8,12 @@
  * function.
  * */
 
-#include "vm/vm.h"
-#include "vm/uninit.h"
-#include "threads/pte.h"
 
 #include <stdio.h>
 
+#include "threads/pte.h"
+#include "vm/vm.h"
+#include "vm/uninit.h"
 
 static bool uninit_initialize(struct page *page, void *kva);
 static void uninit_destroy(struct page *page);
@@ -45,17 +45,21 @@ void uninit_new(struct page *page, void *va, vm_initializer *init,
 
 /* Initalize the page on first fault */
 static bool uninit_initialize(struct page *page, void *kva) {
-  struct thread* curr = thread_current();
+  struct thread *curr = thread_current();
   struct uninit_page *uninit = &page->uninit;
 
   /* Fetch first, page_initialize may overwrite the values */
   vm_initializer *init = uninit->init;
   void *aux = uninit->aux;
 
-  /* TODO: You may need to fix this function. */
-  /* FIXME: install 실패 시 kva 반환. */
-  return uninit->page_initializer(page, uninit->type, kva) &&
-         (init ? init(page, aux) : true) && install_page(page);
+  if (uninit->page_initializer(page, uninit->type, kva) &&
+      (init ? init(page, aux) : true) && install_page(page)) {
+    return true;
+  }
+  /* If initializing failed, destroy do uninit_destroy.
+   * Otherwise, do file_backed_destroy or anon_destory. */
+  destroy(page);
+  return false;
 }
 
 /* Free the resources hold by uninit_page. Although most of pages are transmuted
@@ -64,8 +68,11 @@ static bool uninit_initialize(struct page *page, void *kva) {
  * PAGE will be freed by the caller. */
 static void uninit_destroy(struct page *page) {
   struct uninit_page *uninit = &page->uninit;
-  /* TODO: Fill this function.
-   * TODO: If you don't have anything to do, just return. */
+  /* Called before initializer function get finished. */
+  if(pg_present(page)) {
+    palloc_free_page(page->frame->kva);
+    free(page->frame);
+  }
   free(uninit->aux);
   return;
 }
