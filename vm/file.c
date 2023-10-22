@@ -36,6 +36,7 @@ static void free_slot(size_t slot);
 static bool swap_table_empty(size_t slot);
 static struct page *swap_table_pop(size_t slot);
 static void swap_table_push(size_t slot, struct page *page);
+static struct page *swap_table_remove(size_t slot, struct page *page);
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations file_ops = {
@@ -124,7 +125,7 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
     list_push_back(&frame->pages, &page->frame_elem);
 
     /* Unlink with disk slot. */
-    page->anon.slot = -1;
+    page->anon.slot = SLOT_INIT;
   }
 
   /* Mark as free sector. */
@@ -181,7 +182,11 @@ static bool file_backed_swap_out(struct page *page) {
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void file_backed_destroy(struct page *page) {
   if (!pg_present(page)) {
-    /* TODO: remove from swap table. */
+    size_t slot = page->file.slot;
+    if (!swap_table_remove(slot, page)) {
+      PANIC("Page is not found while removing from list.\n");
+    }
+    free_slot(slot);
     return;
   }
 
@@ -282,7 +287,8 @@ void spt_file_writeback(struct hash_elem *e, void *aux) {
   if (page_get_type(page) != VM_FILE) return;
   if (!is_file_head(page, get_file_page(page))) return;
 
-  /* If page is head-page of file-backed pages, write back. */
+  /* If page is head-page of
+   * file-backed pages, write back. */
   file_write_back_all(page);
 }
 
@@ -478,4 +484,24 @@ static struct page *swap_table_pop(size_t slot) {
 static bool swap_table_empty(size_t slot) {
   ASSERT(slot < MAX_SLOTS)
   return (swap_table[slot] == NULL);
+}
+
+/* Remove page from swap table. */
+static struct page *swap_table_remove(size_t slot, struct page *page) {
+  struct page *before = swap_table[slot];
+  if (before == page) {
+    return swap_table_pop(slot);
+  }
+
+  while (before->next_swap != page) {
+    before = before->next_swap;
+    if (before == NULL) {
+      /* Page is not found. */
+      printf("Page is not found while removing from list.\n");
+      return NULL;
+    }
+  }
+
+  before->next_swap = page->next_swap;
+  return page;
 }

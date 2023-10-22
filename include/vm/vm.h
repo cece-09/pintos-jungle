@@ -64,6 +64,7 @@ struct page {
 
   struct hash_elem table_elem; /* Hash elem for spt. */
   struct list_elem frame_elem; /* List elem for frame-mapping. */
+
   struct page* next_swap;      /* Singly lisked list for swap-table. */
   struct thread* thread;       /* Thread info. */
   uint16_t flags;              /* Flags. */
