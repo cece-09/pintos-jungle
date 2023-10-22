@@ -62,11 +62,11 @@ struct page {
   void *va;            /* Address in terms of user space */
   struct frame *frame; /* Back reference for frame */
 
-  struct hash_elem table_elem;
-  struct list_elem frame_elem;
-  struct page* next_swap;
-  struct thread* thread;
-  uint16_t flags;
+  struct hash_elem table_elem; /* Hash elem for spt. */
+  struct list_elem frame_elem; /* List elem for frame-mapping. */
+  struct page* next_swap;      /* Singly lisked list for swap-table. */
+  struct thread* thread;       /* Thread info. */
+  uint16_t flags;              /* Flags. */
   
   /* Per-type data are binded into the union.
    * Each function automatically detects the current union */
@@ -82,9 +82,9 @@ struct page {
 
 /* The representation of "frame" */
 struct frame {
-  void *kva; /* kernel virtual address */
-  struct list pages;
-  struct list_elem elem;
+  void *kva;             /* Kernel virtual address */
+  struct list pages;     /* List of mapped pages. */
+  struct list_elem elem; /* List elem for frame table.*/
 };
 
 /* The function table for page operations.

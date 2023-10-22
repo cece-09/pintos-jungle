@@ -162,4 +162,4 @@ source ../../activate
 # $PAGE_MERGE_STK
 # $PAGE_MERGE_MM
 
-$FORK_READ
+$SWAP_FILE

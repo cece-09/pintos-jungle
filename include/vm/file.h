@@ -14,6 +14,7 @@ struct file_page {
     off_t offset;
     size_t length; 
     void* map_addr;
+    size_t swap_slot;
 };
 
 void vm_file_init (void);

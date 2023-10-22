@@ -11,11 +11,11 @@
 #include "vm/inspect.h"
 
 static struct semaphore fault_sema;
+static void spt_free_page(struct hash_elem *, void *);
+static void spt_copy_page(struct hash_elem *, void *);
 static uint64_t spt_hash_func(const struct hash_elem *, void *);
 static bool spt_hash_less_func(const struct hash_elem *,
                                const struct hash_elem *, void *);
-static void spt_free_page(struct hash_elem *, void *);
-static void spt_copy_page(struct hash_elem *, void *);
 
 static struct list frame_table;
 
@@ -59,12 +59,7 @@ bool vm_install_page(struct page *page, struct thread *t) {
   ASSERT(page && kva)
 
   // TODO: logic 수정
-  //   if ((pml4_get_page(curr->pml4, page->va) == NULL) &&
-  //       pml4_set_page(curr->pml4, page->va, kva, writable)) {
-  if (pml4_set_page(t->pml4, page->va, kva, writable)) {
-    return true;
-  }
-  return false;
+  return pml4_set_page(t->pml4, page->va, kva, writable);
 }
 
 /* Create the pending page object with initializer. If you want to create a
@@ -184,7 +179,7 @@ static struct frame *vm_evict_frame(void) {
   /* Remove all pages from frame and
    * push into swap table. */
   if (swap_out(page)) {
-    /* After, make frame zero. */
+    /* After, initialize victim. */
     ASSERT(list_empty(&victim->pages));
     memset(victim->kva, 0, PGSIZE);
     return victim;
@@ -208,13 +203,13 @@ static struct frame *vm_get_frame(void) {
   frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
   if (frame->kva == NULL) {
     free(frame);
+    /* If out of memory,
+     * evict frame from frame table.*/
     frame = vm_evict_frame();
   }
 
-  /* Init page list. */
+  /* Init page list, push into frame table. */
   list_init(&frame->pages);
-
-  /* Insert to frame table. */
   list_push_back(&frame_table, &frame->elem);
 
   ASSERT(frame != NULL);
@@ -238,6 +233,8 @@ static bool vm_stack_growth(void *addr) {
 // TODO: uninit page도 handle하게 ?
 bool vm_handle_wp(struct page *page) {
   if (!pg_copy_on_write(page)) {
+    /* If cow-flag is not on,
+     * this page is write-protect page. */
     return false;
   }
 
@@ -245,18 +242,31 @@ bool vm_handle_wp(struct page *page) {
   struct frame *old_frame = page->frame;
   list_remove(&page->frame_elem);
 
+  /* If this page was the last,
+   * Re-link with frame and return. */
+  if (list_empty(&old_frame->pages)) {
+    page->flags = page->flags & ~PG_COW;
+    page->flags = page->flags | PTE_W;
+    list_push_back(&old_frame->pages, &page->frame_elem);
+    return vm_install_page(page, page->thread);
+  }
+
   /* Link with new frame. */
   struct frame *new_frame;
   /* Copy-on-write pages are all present. */
-  if (pg_present(page) && vm_do_claim_page(page)) {
-    /* Page is now swapped-in.
-     * Mark as no copy-on-write page. */
-    new_frame = page->frame;
-    page->flags = page->flags & ~PG_COW;
+  if (pg_present(page)) {
+    /* Mark as no copy-on-write page. */
     page->flags = page->flags | PTE_W;
+    page->flags = page->flags & ~PG_COW;
 
-    /* Copy old frame and re-install. */
-    memcpy(old_frame->kva, new_frame->kva, PGSIZE);
+    if (!vm_do_claim_page(page)) {
+      /* If swap-in fails, return false.*/
+      return false;
+    }
+
+    /* Page is now swapped-in. Copy old frame. */
+    new_frame = page->frame;
+    memcpy(new_frame->kva, old_frame->kva, PGSIZE);
     return true;
   }
   return false;
@@ -308,37 +318,18 @@ bool vm_claim_page(void *va UNUSED) {
   return vm_do_claim_page(page);
 }
 
-/* Clear all pages linked sharing frame from pml4.
- * PAGE must be linked with frame previously.
-void vm_clear_frame_pages(struct page *page) {
-  ASSERT(pg_present(page))
-
-  struct thread *curr = thread_current();
-  struct frame *frame = page->frame;
-
-  struct list_elem *front;
-  struct page *front_page;
-  while (!list_empty(&frame->pages)) {
-    front = list_pop_front(&frame->pages);
-    page = list_entry(front, struct page, frame_elem);
-
-    pml4_clear_page(curr->pml4, page->va);
-    page->flags = page->flags & ~PTE_P;
-  }
-} */
-
 /* Claim the PAGE and set up the mmu. */
 static bool vm_do_claim_page(struct page *page) {
   struct frame *frame = vm_get_frame();
 
-  /* Set links. Push into frame list will be done
-   * in each swap-in functions. */
+  /* Set links. Pushing into frame list
+   * will be done in each swap-in functions. */
   page->frame = frame;
 
-  /* Mark as present */
+  /* Mark as present. */
   page->flags = page->flags | PTE_P;
 
-  /* Initialize page */
+  /* Initialize & install page. */
   return swap_in(page, frame->kva);
 }
 
@@ -349,7 +340,7 @@ void supplemental_page_table_init(struct supplemental_page_table *spt) {
 
   /* Initialize hash table. */
   if (!hash_init(&spt->hash, spt_hash_func, spt_hash_less_func, NULL)) {
-    PANIC("spt not initialized!\n");
+    PANIC("spt not initialized.\n");
   }
   return;
 }
@@ -413,8 +404,11 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
   /* Deconnect from parent's hash table. */
   memset(&dsc_page->table_elem, 0, sizeof(struct hash_elem));
   memset(&dsc_page->frame_elem, 0, sizeof(struct list_elem));
-  memset(&dsc_page->next_swap, 0, sizeof(struct page *));
   hash_insert(dsc_hash, &dsc_page->table_elem);
+
+  /* Set new values. */
+  dsc_page->next_swap = NULL;
+  dsc_page->thread = thread_current();
 
   switch (page_get_type(src_page)) {
     case VM_ANON:

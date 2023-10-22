@@ -55,10 +55,10 @@ static bool uninit_initialize(struct page *page, void *kva) {
   void *aux = uninit->aux;
 
   if (uninit->page_initializer(page, uninit->type, kva) &&
-      (init ? init(page, aux) : true) && vm_install_page(page, curr)) {
-    /* Link with frame. */
+      (init ? init(page, aux) : true)) {
+    
     list_push_back(&frame->pages, &page->frame_elem);
-    return true;
+    return vm_install_page(page, curr);
   }
   /* If initializing failed, destroy do uninit_destroy.
    * Otherwise, do file_backed_destroy or anon_destory. */
