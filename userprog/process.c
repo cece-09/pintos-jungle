@@ -319,12 +319,10 @@ void process_exit(void) {
   /* Close exec file. */
   exec_file_cleanup();
 
-  sema_down(&file_sema);
-
   /* If current is user process, */
   if (curr->task == USER_TASK) {
     /* Print termination message. */
-    printf("%s: (%d) exit(%lld)\n", curr->name, curr->tid, curr->exit_code);
+    printf("%s: exit(%lld)\n", curr->name, curr->exit_code);
   }
 
   /* Clean up pml4 */
@@ -339,7 +337,6 @@ void process_exit(void) {
       sema_up(&curr->parent->wait_sema);
     }
   }
-  sema_up(&file_sema);
 }
 
 /* Clear file sema. This function is called

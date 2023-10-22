@@ -16,7 +16,6 @@ test_main (void)
     children[i] = fork ("child-linear");
     if (children[i] == 0) {
       if (exec ("child-linear") == -1) {
-        printf("👊 exec fail.\n");
         fail ("failed to exec child-linear");
       }
     }

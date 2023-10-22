@@ -73,7 +73,7 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
   if (!succ) return false;
 
   /* Install in pml4, mark as present. */
-  install_page(page);
+  vm_install_page(page, thread_current());
   page->flags = page->flags | PTE_P;
   return true;
 }
@@ -192,7 +192,7 @@ void do_munmap(void *addr) {
  * back to disk if page is dirty.
  * See supplemental_page_table_kill in vm.c */
 void spt_file_writeback(struct hash_elem *e, void *aux) {
-  struct page *page = hash_entry(e, struct page, elem);
+  struct page *page = hash_entry(e, struct page, table_elem);
   if (page_get_type(page) != VM_FILE) return;
   if (!is_file_head(page, get_file_page(page))) return;
 

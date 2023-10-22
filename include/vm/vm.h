@@ -32,9 +32,9 @@ enum vm_type {
   VM_MARKER_END = (1 << 31),
 };
 
+#include "vm/uninit.h"
 #include "vm/anon.h"
 #include "vm/file.h"
-#include "vm/uninit.h"
 #ifdef EFILESYS
 #include "filesys/page_cache.h"
 #endif
@@ -62,9 +62,10 @@ struct page {
   void *va;            /* Address in terms of user space */
   struct frame *frame; /* Back reference for frame */
 
-  /* Your implementation */
-  /* SPT - for hash table */
-  struct hash_elem elem;
+  struct hash_elem table_elem;
+  struct list_elem frame_elem;
+  struct page* next_swap;
+  struct thread* thread;
   uint16_t flags;
   
   /* Per-type data are binded into the union.
@@ -82,7 +83,7 @@ struct page {
 /* The representation of "frame" */
 struct frame {
   void *kva; /* kernel virtual address */
-  struct page *page;
+  struct list pages;
   struct list_elem elem;
 };
 
@@ -142,8 +143,9 @@ bool vm_claim_page(void *va);
 enum vm_type page_get_type(struct page *page);
 
 /* New functions. */
-bool install_page(struct page *page);
 void clear_vm_file_sema(void);
 bool vm_handle_wp(struct page *page);
+void vm_clear_frame_pages(struct page *page);
+bool vm_install_page(struct page *page, struct thread* t);
 
 #endif /* VM_VM_H */

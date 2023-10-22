@@ -47,13 +47,17 @@ void uninit_new(struct page *page, void *va, vm_initializer *init,
 static bool uninit_initialize(struct page *page, void *kva) {
   struct thread *curr = thread_current();
   struct uninit_page *uninit = &page->uninit;
+  struct frame *frame = page->frame;
+  ASSERT(frame && frame->kva);
 
   /* Fetch first, page_initialize may overwrite the values */
   vm_initializer *init = uninit->init;
   void *aux = uninit->aux;
 
   if (uninit->page_initializer(page, uninit->type, kva) &&
-      (init ? init(page, aux) : true) && install_page(page)) {
+      (init ? init(page, aux) : true) && vm_install_page(page, curr)) {
+    /* Link with frame. */
+    list_push_back(&frame->pages, &page->frame_elem);
     return true;
   }
   /* If initializing failed, destroy do uninit_destroy.
@@ -69,7 +73,7 @@ static bool uninit_initialize(struct page *page, void *kva) {
 static void uninit_destroy(struct page *page) {
   struct uninit_page *uninit = &page->uninit;
   /* Called before initializer function get finished. */
-  if(pg_present(page)) {
+  if (pg_present(page)) {
     palloc_free_page(page->frame->kva);
     free(page->frame);
   }
