@@ -5,7 +5,6 @@
 
 #include "devices/disk.h"
 #include "vm/vm.h"
-#include "vm/anon.h"
 
 /* DO NOT MODIFY BELOW LINE */
 static struct disk *swap_disk;
@@ -14,18 +13,19 @@ static bool anon_swap_out(struct page *page);
 static void anon_destroy(struct page *page);
 
 /* Swap table. */
+#define DISK_SEC 512
+#define SEC_PER_PAGE 8
+#define MAX_SLOTS 32768
+#define SLOT_INIT (size_t)(-1)
+
 static struct bitmap *swap_slot;
 static struct page **swap_table;
 
-#define MAX_DISK_SLOT 32768
-#define SEC_PER_PAGE 8
-#define DISK_SEC 512
-
-/* Disk read & write func type. */
-typedef (*disk_oper)(struct disk *, disk_sector_t, const void *);
-
 /* Semaphore for sector allocation. */
 static struct lock slot_lock;
+
+/* Disk read & write func type. */
+typedef void (*disk_io)(struct disk *, disk_sector_t, const void *);
 
 /* === Helpers. === */
 static size_t allocate_slot();
@@ -34,7 +34,7 @@ static bool swap_table_empty(size_t slot);
 static struct page *swap_table_pop(size_t slot);
 static void swap_table_push(size_t slot, struct page *page);
 static bool do_disk_io(disk_sector_t sector, size_t num, const void *kva,
-                       disk_oper func);
+                       disk_io func);
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations anon_ops = {
@@ -51,7 +51,7 @@ void vm_anon_init(void) {
 
   /* Calculate disk size. */
   size_t slots = disk_size(swap_disk) / SEC_PER_PAGE;
-  slots = MAX_DISK_SLOT < slots ? MAX_DISK_SLOT : slots;
+  slots = MAX_SLOTS < slots ? MAX_SLOTS : slots;
 
   /* Create swap slot table. */
   swap_slot = bitmap_create(slots);
@@ -71,7 +71,7 @@ bool anon_initializer(struct page *page, enum vm_type type, void *kva) {
   struct anon_page *anon_page = &page->anon;
 
   *anon_page = (struct anon_page){
-      .slot = -1,
+      .slot = SLOT_INIT,
   };
   return true;
 }
@@ -84,7 +84,7 @@ static bool anon_swap_in(struct page *page, void *kva) {
   ASSERT(frame && kva)
 
   size_t slot = page->anon.slot;
-  if ((long)slot < 0) {
+  if (slot == SLOT_INIT) {
     /* If page was never swapped out, just install. */
     list_push_back(&frame->pages, &page->frame_elem);
     return vm_install_page(page, page->thread);
@@ -93,7 +93,8 @@ static bool anon_swap_in(struct page *page, void *kva) {
   /* Read from disk_sec */
   disk_sector_t sec = slot * SEC_PER_PAGE;
   do_disk_io(sec, SEC_PER_PAGE, kva, disk_read);
-
+  
+  /* Set all linked pages present. */
   while (!swap_table_empty(slot)) {
     page = swap_table_pop(slot);
     ASSERT(page != NULL);
@@ -110,7 +111,6 @@ static bool anon_swap_in(struct page *page, void *kva) {
 
   /* Mark as free sector. */
   free_slot(slot);
-
   return true;
 }
 
@@ -130,7 +130,7 @@ static bool anon_swap_out(struct page *page) {
   disk_sector_t sec = slot * SEC_PER_PAGE;
   do_disk_io(sec, SEC_PER_PAGE, kva, disk_write);
 
-  /* Mark as used sector. */
+  /* Clear all linked pages. */
   struct thread *t;
   struct page *prev;
   struct list_elem *front;
@@ -141,8 +141,8 @@ static bool anon_swap_out(struct page *page) {
 
     /* Unlink with frame. */
     page->frame = NULL;
-    pml4_clear_page(t->pml4, page->va);
     page->flags = page->flags & ~PTE_P;
+    pml4_clear_page(t->pml4, page->va);
 
     /* Link with disk slot. */
     page->anon.slot = slot;
@@ -156,6 +156,7 @@ static bool anon_swap_out(struct page *page) {
 /* Destroy the anonymous page. PAGE will be freed by the caller. */
 static void anon_destroy(struct page *page) {
   if (!pg_present(page)) {
+    /* TODO: remove from swap table. */
     return;
   }
 
@@ -171,7 +172,7 @@ static void anon_destroy(struct page *page) {
     palloc_free_page(page->frame->kva);
     free(page->frame);
   }
-  
+
   return;
 }
 
@@ -193,7 +194,7 @@ static void free_slot(size_t slot) {
 /* Do read or write to swap disk from SECTOR
  * for NUM consecutive sectors. */
 static bool do_disk_io(disk_sector_t sector, size_t num, const void *kva,
-                       disk_oper func) {
+                       disk_io func) {
   int i = 0;
   for (; i < num; i++) {
     func(swap_disk, sector + i, kva + (i * DISK_SEC));
@@ -202,7 +203,7 @@ static bool do_disk_io(disk_sector_t sector, size_t num, const void *kva,
 
 /* Push front into swap table. */
 static void swap_table_push(size_t slot, struct page *page) {
-  ASSERT(slot < MAX_DISK_SLOT)
+  ASSERT(slot < MAX_SLOTS)
   lock_acquire(&slot_lock);
   struct page *curr = swap_table[slot];
   page->next_swap = curr;
@@ -212,7 +213,7 @@ static void swap_table_push(size_t slot, struct page *page) {
 
 /* Pop front from swap table. */
 static struct page *swap_table_pop(size_t slot) {
-  ASSERT(slot < MAX_DISK_SLOT)
+  ASSERT(slot < MAX_SLOTS)
   lock_acquire(&slot_lock);
   /* Returns NULL if table is empty. */
   struct page *top = swap_table[slot];
@@ -226,6 +227,6 @@ static struct page *swap_table_pop(size_t slot) {
 
 /* Returns if swap table is empty. */
 static bool swap_table_empty(size_t slot) {
-  ASSERT(slot < MAX_DISK_SLOT)
+  ASSERT(slot < MAX_SLOTS)
   return (swap_table[slot] == NULL);
 }

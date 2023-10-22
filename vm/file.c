@@ -1,22 +1,41 @@
 /* file.c: Implementation of memory backed file object (mmaped object). */
 
+#include <bitmap.h>
 #include <stdio.h>
 
 #include "vm/vm.h"
 
+/* Basic operations. */
 static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
-static bool file_write_back(struct page *page, struct page *head);
-static void file_write_back_all(struct page *head);
-static bool lazy_load_file(struct page *page, void *aux);
-static bool do_page_read_write(struct page *page, struct page *head,
-                               file_rw_func func);
-static struct page *spt_get_head(struct page *page);
-static struct file_page *get_file_page(struct page *page);
+
+/* Swap table. */
+#define MAX_SLOTS 32768
+#define SLOT_INIT (size_t)(-1)
+static struct bitmap *swap_slot;
+static struct page **swap_table;
 
 /* Control lazy load order. */
 static struct semaphore file_sema;
+static struct lock slot_lock;
+
+/* Read/Write function type. */
+typedef off_t (*file_io)(struct file *, const void *, off_t);
+
+/* === Helpers. === */
+static bool file_write_back(struct page *page, struct page *head);
+static void file_write_back_all(struct page *head);
+static bool lazy_load_file(struct page *page, void *aux);
+static bool do_file_io(struct page *page, struct page *head, file_io func);
+static struct page *spt_get_head(struct page *page);
+static struct file_page *get_file_page(struct page *page);
+
+static size_t allocate_slot();
+static void free_slot(size_t slot);
+static bool swap_table_empty(size_t slot);
+static struct page *swap_table_pop(size_t slot);
+static void swap_table_push(size_t slot, struct page *page);
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations file_ops = {
@@ -28,8 +47,17 @@ static const struct page_operations file_ops = {
 
 /* The initializer of file vm */
 void vm_file_init(void) {
+  /* Create swap table. */
+  size_t slots = MAX_SLOTS;
+  swap_slot = bitmap_create(slots);
+
+  /* Create swap slot table. */
+  size_t page_cnt = (slots * sizeof(struct page *)) / 0x1000;
+  swap_table = palloc_get_multiple(PAL_ZERO, page_cnt);
+
   /* Init filesys lock. */
   sema_init(&file_sema, 1);
+  lock_init(&slot_lock);
 }
 
 /* Initialize the file backed page */
@@ -50,10 +78,11 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
   /* Initialize file page fields. */
   struct file_page *file_page = &page->file;
   *file_page = (struct file_page){
-      .file = file,        /* mapped file ptr. */
-      .offset = offset,    /* map start offset. */
-      .length = length,    /* length of mapping. */
-      .map_addr = map_addr /* va where mapping starts. */
+      .file = file,         /* mapped file ptr. */
+      .offset = offset,     /* map start offset. */
+      .length = length,     /* length of mapping. */
+      .map_addr = map_addr, /* va where mapping starts. */
+      .slot = SLOT_INIT     /* swap slot info. */
   };
   free(aux);
   return true;
@@ -61,55 +90,112 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
 
 /* Swap in the page by read contents from the file. */
 static bool file_backed_swap_in(struct page *page, void *kva) {
+  ASSERT(page_get_type(page) == VM_FILE)
+
+  struct frame *frame = page->frame;
+  ASSERT(frame && kva)
+
+  size_t slot = page->anon.slot;
+  if (slot == SLOT_INIT) {
+    /* If page was never swapped out, just install. */
+    list_push_back(&frame->pages, &page->frame_elem);
+    return vm_install_page(page, page->thread);
+  }
+
   struct page *head = spt_get_head(page);
   ASSERT(head != NULL)
 
-  bool succ;
-
   /* Read from file to kva. */
+  bool succ;
   sema_down(&file_sema);
-  succ = do_page_read_write(page, head, file_read);
+  succ = do_file_io(page, head, file_read);
   sema_up(&file_sema);
   if (!succ) return false;
 
-  /* Install in pml4, mark as present. */
-  vm_install_page(page, thread_current());
-  page->flags = page->flags | PTE_P;
+  /* Set all linked pages present. */
+  while (!swap_table_empty(slot)) {
+    page = swap_table_pop(slot);
+    ASSERT(page != NULL);
+
+    /* Link with frame. */
+    page->frame = frame;
+    page->flags = page->flags | PTE_P;
+    vm_install_page(page, page->thread);
+    list_push_back(&frame->pages, &page->frame_elem);
+
+    /* Unlink with disk slot. */
+    page->anon.slot = -1;
+  }
+
+  /* Mark as free sector. */
+  free_slot(slot);
   return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool file_backed_swap_out(struct page *page) {
-  struct thread *curr = thread_current();
+  struct frame *frame = page->frame;
+  void *kva = page->frame->kva;
+  ASSERT(frame && kva)
+
   struct page *head = spt_get_head(page);
   ASSERT(head != NULL)
 
-  bool succ;
+  /* Find free swap table slot. */
+  size_t slot = allocate_slot();
+  if (slot == BITMAP_ERROR) {
+    return false;
+  }
 
+  /* Write back to file. */
+  bool succ;
   sema_down(&file_sema);
   succ = file_write_back(page, head);
   sema_up(&file_sema);
   if (!succ) return false;
 
-  /* Clear from pml4, mark as unpresent. */
-  pml4_set_dirty(curr->pml4, page->va, false);
-  pml4_clear_page(curr->pml4, page->va);
-  page->flags = page->flags & ~PTE_P;
-  page->frame = NULL;
+  /* Clear all linked pages. */
+  struct thread *t;
+  struct page *prev;
+  struct list_elem *front;
+  while (!list_empty(&frame->pages)) {
+    front = list_pop_front(&frame->pages);
+    page = list_entry(front, struct page, frame_elem);
+    t = page->thread;
+
+    /* Unlink with frame. */
+    page->frame = NULL;
+    page->flags = page->flags & ~PTE_P;
+    pml4_clear_page(t->pml4, page->va);
+    pml4_set_dirty(t->pml4, page->va, false);
+
+    /* Link with disk slot. */
+    page->file.slot = slot;
+    swap_table_push(slot, page);
+    ASSERT(!swap_table_empty(slot));
+  }
+
   return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void file_backed_destroy(struct page *page) {
-  struct thread *curr = thread_current();
+  if (!pg_present(page)) {
+    /* TODO: remove from swap table. */
+    return;
+  }
 
   /* Clear up if frame-mapped page. */
-  if (pg_present(page)) {
-    pml4_clear_page(curr->pml4, page->va);
-    if (!pg_copy_on_write(page)) {
-      palloc_free_page(page->frame->kva);
-      free(page->frame);
-    }
+  struct thread *t = page->thread;
+  pml4_clear_page(t->pml4, page->va);
+
+  struct frame *frame = page->frame;
+  list_remove(&page->frame_elem);
+
+  /* If page is the last, free frame. */
+  if (list_empty(&frame->pages)) {
+    palloc_free_page(page->frame->kva);
+    free(page->frame);
   }
 
   return;
@@ -221,7 +307,7 @@ static bool lazy_load_file(struct page *page, void *aux) {
   /* Read file to page. */
   bool succ;
   sema_down(&file_sema);
-  succ = do_page_read_write(page, head, file_read);
+  succ = do_file_io(page, head, file_read);
   sema_up(&file_sema);
 
   return succ;
@@ -267,7 +353,7 @@ static bool file_write_back(struct page *page, struct page *head) {
   }
 
   /* Write back to file. */
-  if (!do_page_read_write(page, head, file_write)) {
+  if (!do_file_io(page, head, file_write)) {
     printf("Fail to write back file.\n");
     return false;
   }
@@ -276,8 +362,7 @@ static bool file_write_back(struct page *page, struct page *head) {
 
 /* Calculate page offset in mapped area
  * and execute func handed by argument. */
-static bool do_page_read_write(struct page *page, struct page *head,
-                               file_rw_func func) {
+static bool do_file_io(struct page *page, struct page *head, file_io func) {
   struct file *file = head->file.file;
   off_t offset = page->file.offset;
   size_t length = page->file.length;
@@ -290,10 +375,10 @@ static bool do_page_read_write(struct page *page, struct page *head,
   off_t page_offset = (page->va - map_addr) / PGSIZE;
 
   /* Calculate read-write-start point. */
-  off_t rw_start = offset + page_offset * PGSIZE;
+  off_t start = offset + page_offset * PGSIZE;
 
   /* Calculate read-write-bytes. */
-  file_seek(file, rw_start);
+  file_seek(file, start);
 
   /*
      offset                                   len  page-aligned
@@ -317,12 +402,12 @@ static bool do_page_read_write(struct page *page, struct page *head,
   */
 
   off_t file_left = file_length(file) - file->pos;
-  size_t rw_bytes = (offset + length) - rw_start;
-  rw_bytes = rw_bytes < PGSIZE ? rw_bytes : PGSIZE;
-  rw_bytes = rw_bytes < file_left ? rw_bytes : file_left;
+  size_t bytes = (offset + length) - start;
+  bytes = bytes < PGSIZE ? bytes : PGSIZE;
+  bytes = bytes < file_left ? bytes : file_left;
 
   /* Do func. */
-  if (func(file, kva, rw_bytes) != (int)rw_bytes) {
+  if (func(file, kva, bytes) != (int)bytes) {
     return false;
   }
   return true;
@@ -348,4 +433,49 @@ static struct file_page *get_file_page(struct page *page) {
     return &page->file;
   }
   return page->uninit.aux;
+}
+
+/* Find free disk slot. */
+static size_t allocate_slot() {
+  lock_acquire(&slot_lock);
+  size_t slot = bitmap_scan_and_flip(swap_slot, 0, 1, false);
+  lock_release(&slot_lock);
+  return slot;
+}
+
+/* Mark as free slot. */
+static void free_slot(size_t slot) {
+  lock_acquire(&slot_lock);
+  bitmap_set(swap_slot, slot, false);
+  lock_release(&slot_lock);
+}
+
+/* Push front into swap table. */
+static void swap_table_push(size_t slot, struct page *page) {
+  ASSERT(slot < MAX_SLOTS);
+  lock_acquire(&slot_lock);
+  struct page *curr = swap_table[slot];
+  page->next_swap = curr;
+  swap_table[slot] = page;
+  lock_release(&slot_lock);
+}
+
+/* Pop front from swap table. */
+static struct page *swap_table_pop(size_t slot) {
+  ASSERT(slot < MAX_SLOTS);
+  lock_acquire(&slot_lock);
+  /* Returns NULL if table is empty. */
+  struct page *top = swap_table[slot];
+  if (top != NULL) {
+    swap_table[slot] = top->next_swap;
+    top->next_swap = NULL;
+  }
+  lock_release(&slot_lock);
+  return top;
+}
+
+/* Returns if swap table is empty. */
+static bool swap_table_empty(size_t slot) {
+  ASSERT(slot < MAX_SLOTS)
+  return (swap_table[slot] == NULL);
 }
