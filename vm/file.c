@@ -17,7 +17,7 @@ static struct bitmap *swap_slot;
 static struct page **swap_table;
 
 /* Control lazy load order. */
-static struct semaphore file_sema;
+static struct semaphore load_sema;
 static struct lock slot_lock;
 
 /* Read/Write function type. */
@@ -29,7 +29,6 @@ static void file_write_back_all(struct page *head);
 static bool lazy_load_file(struct page *page, void *aux);
 static bool do_file_io(struct page *page, struct page *head, file_io func);
 static struct page *spt_get_head(struct page *page);
-static struct file_page *get_file_page(struct page *page);
 
 static size_t allocate_slot();
 static void free_slot(size_t slot);
@@ -57,7 +56,7 @@ void vm_file_init(void) {
   swap_table = palloc_get_multiple(PAL_ZERO, page_cnt);
 
   /* Init filesys lock. */
-  sema_init(&file_sema, 1);
+  sema_init(&load_sema, 1);
   lock_init(&slot_lock);
 }
 
@@ -108,9 +107,9 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
 
   /* Read from file to kva. */
   bool succ;
-  sema_down(&file_sema);
-  succ = do_file_io(page, head, file_read);
-  sema_up(&file_sema);
+  //   sema_down(&file_sema);
+  succ = do_file_io(page, head, filesys_read);
+  //   sema_up(&file_sema);
   if (!succ) return false;
 
   /* Set all linked pages present. */
@@ -150,9 +149,9 @@ static bool file_backed_swap_out(struct page *page) {
 
   /* Write back to file. */
   bool succ;
-  sema_down(&file_sema);
+  //   sema_down(&file_sema);
   succ = file_write_back(page, head);
-  sema_up(&file_sema);
+  //   sema_up(&file_sema);
   if (!succ) return false;
 
   /* Clear all linked pages. */
@@ -295,9 +294,25 @@ void spt_file_writeback(struct hash_elem *e, void *aux) {
 /* Clear file sema. This function is called
  * when page fault exception occurs. */
 void clear_vm_file_sema(void) {
-  if (file_sema.value == 0) {
-    sema_up(&file_sema);
+  if (load_sema.value == 0) {
+    sema_up(&load_sema);
   }
+}
+
+/* Get file_page struct. */
+struct file_page *get_file_page(struct page *page) {
+  ASSERT(page_get_type(page) == VM_FILE)
+  if (page->operations->type == VM_FILE) {
+    return &page->file;
+  }
+  return page->uninit.aux;
+}
+
+/* Called in supplemental table copy. */
+void file_swap_table_push(size_t slot, struct page *page) {
+  ASSERT(slot <= MAX_SLOTS);
+  ASSERT(slot != SLOT_INIT);
+  return swap_table_push(slot, page);
 }
 
 /* Initialize file-backed frame. */
@@ -312,9 +327,9 @@ static bool lazy_load_file(struct page *page, void *aux) {
 
   /* Read file to page. */
   bool succ;
-  sema_down(&file_sema);
+  sema_down(&load_sema);
   succ = do_file_io(page, head, file_read);
-  sema_up(&file_sema);
+  sema_up(&load_sema);
 
   return succ;
 }
@@ -345,7 +360,7 @@ static void file_write_back_all(struct page *head) {
   }
 
   /* Close file. */
-  file_close(get_file_page(head)->file);
+  filesys_close(get_file_page(head)->file);
 }
 
 /* Write back a single page to file. Called when unmap. */
@@ -359,7 +374,7 @@ static bool file_write_back(struct page *page, struct page *head) {
   }
 
   /* Write back to file. */
-  if (!do_file_io(page, head, file_write)) {
+  if (!do_file_io(page, head, filesys_write)) {
     printf("Fail to write back file.\n");
     return false;
   }
@@ -384,7 +399,7 @@ static bool do_file_io(struct page *page, struct page *head, file_io func) {
   off_t start = offset + page_offset * PGSIZE;
 
   /* Calculate read-write-bytes. */
-  file_seek(file, start);
+  filesys_seek(file, start);
 
   /*
      offset                                   len  page-aligned
@@ -407,7 +422,7 @@ static bool do_file_io(struct page *page, struct page *head, file_io func) {
        Page 1 takes file_left, and so on.
   */
 
-  off_t file_left = file_length(file) - file->pos;
+  off_t file_left = filesys_length(file) - file->pos;
   size_t bytes = (offset + length) - start;
   bytes = bytes < PGSIZE ? bytes : PGSIZE;
   bytes = bytes < file_left ? bytes : file_left;
@@ -432,14 +447,7 @@ static struct page *spt_get_head(struct page *page) {
   return spt_find_page(&curr->spt, file_page->map_addr);
 }
 
-/* Get file_page struct. */
-static struct file_page *get_file_page(struct page *page) {
-  ASSERT(page_get_type(page) == VM_FILE)
-  if (page->operations->type == VM_FILE) {
-    return &page->file;
-  }
-  return page->uninit.aux;
-}
+
 
 /* Find free disk slot. */
 static size_t allocate_slot() {
@@ -497,7 +505,6 @@ static struct page *swap_table_remove(size_t slot, struct page *page) {
     before = before->next_swap;
     if (before == NULL) {
       /* Page is not found. */
-      printf("Page is not found while removing from list.\n");
       return NULL;
     }
   }

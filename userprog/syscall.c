@@ -4,7 +4,7 @@
 #include <string.h>
 #include <syscall-nr.h>
 
-#include "filesys/file.h"
+// #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "intrinsic.h"
 #include "threads/flags.h"
@@ -101,9 +101,8 @@ void syscall_handler(struct intr_frame *f) {
                           .a6 = f->R.r9,
                           .intr = f};
   
-//   sema_down(&sys_sema);
   f->R.rax = syscall[num](args);
-  if(!sys_sema.value) sema_up(&sys_sema);
+  if(!sys_sema.value) // sema_up(&sys_sema);
   return;
 }
 
@@ -130,9 +129,9 @@ uint64_t create(struct sys_args args) {
   }
 
   bool rtn;
-  sema_down(&sys_sema);
+  // sema_down(&sys_sema);
   rtn = filesys_create(file, initial_size);
-  sema_up(&sys_sema);
+  // sema_up(&sys_sema);
   return (uint64_t)rtn;
 }
 
@@ -143,7 +142,7 @@ uint64_t open(struct sys_args args) {
     error_exit(-1);
   }
 
-  sema_down(&sys_sema);
+  // sema_down(&sys_sema);
   struct thread *curr = thread_current();
 
   int fd = allocate_fd();
@@ -158,10 +157,10 @@ uint64_t open(struct sys_args args) {
   }
 
   curr->fdt[fd] = file;
-  sema_up(&sys_sema);
+  // sema_up(&sys_sema);
   return (uint64_t)fd;
 err:
-  sema_up(&sys_sema);
+  // sema_up(&sys_sema);
   return error;
 }
 
@@ -202,9 +201,9 @@ uint64_t close(struct sys_args args) {
   }
 
   free_fd(fd);
-  sema_down(&sys_sema);
-  file_close(file);
-  sema_up(&sys_sema);
+  // sema_down(&sys_sema);
+  filesys_close(file);
+  // sema_up(&sys_sema);
 }
 
 /* Read from file to buffer. */
@@ -228,13 +227,13 @@ uint64_t read(struct sys_args args) {
     return error;
   }
 
-  sema_down(&sys_sema);
+  // sema_down(&sys_sema);
   struct file **fdt = thread_current()->fdt;
 
   /* Standard I/O */
   if (is_file_std(fdt[fd])) {
     if (fdt[fd] == OPEN_STDIN) {
-      sema_up(&sys_sema);
+      // sema_up(&sys_sema);
       return input_getc();
     } else
       goto err;
@@ -246,11 +245,12 @@ uint64_t read(struct sys_args args) {
     goto err;
   }
 
-  int rtn = file_read(file, buffer, size);
-  sema_up(&sys_sema);
+  int rtn = filesys_read(file, buffer, size);
+  // TODO:
+  // sema_up(&sys_sema);
   return (uint64_t)rtn;
 err:
-  sema_up(&sys_sema);
+  // sema_up(&sys_sema);
   return error;
 }
 
@@ -270,14 +270,14 @@ uint64_t write(struct sys_args args) {
     return error;
   }
 
-  sema_down(&sys_sema);
+  // sema_down(&sys_sema);
   struct file **fdt = thread_current()->fdt;
 
   /* Standard I/O */
   if (is_file_std(fdt[fd])) {
     if (fdt[fd] == OPEN_STDOUT) {
       putbuf((char *)buffer, size);
-      sema_up(&sys_sema);
+      // sema_up(&sys_sema);
       return (uint64_t)size;
     } else
       goto err;
@@ -288,11 +288,12 @@ uint64_t write(struct sys_args args) {
     goto err;
   }
 
-  int rtn = file_write(file, buffer, size);
-  sema_up(&sys_sema);
+  int rtn = filesys_write(file, buffer, size);
+  // TODO:
+  // sema_up(&sys_sema);
   return (uint64_t)rtn;
 err:
-  sema_up(&sys_sema);
+  // sema_up(&sys_sema);
   return error;
 }
 
@@ -349,9 +350,9 @@ uint64_t filesize(struct sys_args args) {
   }
 
   off_t rtn;
-  sema_down(&sys_sema);
-  rtn = file_length(fdt[fd]);
-  sema_up(&sys_sema);
+  // sema_down(&sys_sema);
+  rtn = filesys_length(fdt[fd]);
+  // sema_up(&sys_sema);
   return (uint64_t)rtn;
 }
 
@@ -366,10 +367,10 @@ uint64_t fork(struct sys_args args) {
   }
 
   tid_t rtn;
-  sema_up(&sys_sema);
-  //   // sema_down(&sys_sema);
+  // sema_up(&sys_sema);
+  //   // // sema_down(&sys_sema);
   rtn = process_fork(thread_name, user_if);
-  //   // sema_up(&sys_sema);
+  //   // // sema_up(&sys_sema);
   return (uint64_t)rtn;
 }
 
@@ -377,7 +378,7 @@ uint64_t fork(struct sys_args args) {
 uint64_t wait(struct sys_args args) {
   tid_t tid = (tid_t)args.a1;
   ASSERT(tid >= 0);
-  sema_up(&sys_sema);
+  // sema_up(&sys_sema);
 
   return (uint64_t)process_wait(tid);
 }
@@ -411,9 +412,9 @@ uint64_t remove(struct sys_args args) {
   }
 
   bool rtn;
-  sema_down(&sys_sema);
+  // sema_down(&sys_sema);
   rtn = filesys_remove(file);
-  sema_up(&sys_sema);
+  // sema_up(&sys_sema);
   return (uint64_t)rtn;
 }
 
@@ -430,9 +431,9 @@ uint64_t seek(struct sys_args args) {
     return error;
   }
 
-  sema_down(&sys_sema);
-  file_seek(fdt[fd], position);
-  sema_up(&sys_sema);
+  // sema_down(&sys_sema);
+  filesys_seek(fdt[fd], position);
+  // sema_up(&sys_sema);
 }
 
 /* Tell file. */
@@ -448,9 +449,9 @@ uint64_t tell(struct sys_args args) {
   }
 
   unsigned rtn;
-  sema_down(&sys_sema);
-  rtn = file_tell(fdt[fd]);
-  sema_up(&sys_sema);
+  // sema_down(&sys_sema);
+  rtn = filesys_tell(fdt[fd]);
+  // sema_up(&sys_sema);
   return (uint64_t)rtn;
 }
 
@@ -504,7 +505,7 @@ uint64_t munmap(struct sys_args args) {
 /* Clear sema. See exception.c */
 void clear_syscall_file_sema() {
   if (sys_sema.value == 0) {
-    sema_up(&sys_sema);
+    // sema_up(&sys_sema);
   }
 }
 

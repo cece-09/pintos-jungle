@@ -44,11 +44,13 @@ struct thread;
 
 #define VM_TYPE(type) ((type) & 7)
 #define PG_COW 0x80
+#define PG_INIT 0x100
 
 /* Check page flag bits. */
 #define pg_writable(page) ((page->flags & PTE_W ) != 0)
 #define pg_present(page) ((page->flags & PTE_P ) != 0)
 #define pg_copy_on_write(page) ((page->flags & PG_COW ) != 0)
+#define pg_init(page) ((page->flags & PG_INIT ) != 0)
 
 /* Absolute stack limit. */
 #define STACK_LIMIT (USER_STACK - (1 << 20))

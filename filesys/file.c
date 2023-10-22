@@ -7,7 +7,6 @@
 #include "filesys/inode.h"
 #include "threads/malloc.h"
 
-static struct lock file_lock;
 
 /* Opens a file for the given INODE, of which it takes ownership,
  * and returns the new file.  Returns a null pointer if an
@@ -126,7 +125,9 @@ void file_allow_write(struct file *file) {
 /* Returns the size of FILE in bytes. */
 off_t file_length(struct file *file) {
   ASSERT(file != NULL);
-  return inode_length(file->inode);
+  off_t length;
+  length = inode_length(file->inode);
+  return length;
 }
 
 /* Sets the current position in FILE to NEW_POS bytes from the
@@ -141,5 +142,7 @@ void file_seek(struct file *file, off_t new_pos) {
  * start of the file. */
 off_t file_tell(struct file *file) {
   ASSERT(file != NULL);
-  return file->pos;
+  off_t pos;
+  pos = file->pos;
+  return pos;
 }

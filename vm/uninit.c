@@ -56,7 +56,11 @@ static bool uninit_initialize(struct page *page, void *kva) {
 
   if (uninit->page_initializer(page, uninit->type, kva) &&
       (init ? init(page, aux) : true)) {
+
+    /* Mark as initialized page. */
+    page->flags = page->flags | PG_INIT;
     
+    /* Link with frame. */
     list_push_back(&frame->pages, &page->frame_elem);
     return vm_install_page(page, curr);
   }

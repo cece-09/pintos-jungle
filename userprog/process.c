@@ -38,7 +38,7 @@ static void duplicate_fdt(struct thread *, struct thread *);
 static bool load(const char *file_name, struct intr_frame *if_);
 
 /* Filesys sema. Used in process.c and vm/file.c */
-static struct semaphore file_sema;
+static struct semaphore load_sema;
 
 /* General process initializer for initd and other process. */
 static bool process_init(void) {
@@ -62,7 +62,7 @@ tid_t process_create_initd(const char *file_name) {
   char *fn_copy;
   tid_t tid;
 
-  sema_init(&file_sema, 1);
+  sema_init(&load_sema, 1);
 
   /* Make a copy of FILE_NAME.
    * Otherwise there's a race between the caller and load(). */
@@ -253,9 +253,9 @@ int process_exec(void *f_name) {
 #endif
 
   /* And then load the binary */
-  sema_down(&file_sema);
+  sema_down(&load_sema);
   success = load(file_name, &_if);
-  sema_up(&file_sema);
+  sema_up(&load_sema);
 
   /* If load failed, quit. */
   palloc_free_page(file_name);
@@ -291,9 +291,9 @@ int process_wait(tid_t child_tid) {
     /* If child exit, remove from list and return. */
     if (child->status == CHILD_EXIT) {
       rtn = child->rtn_value;
-    //   if(rtn != 0x42) {
-    //     printf("🔥 tid %d \n", child->tid);
-    //   }
+      //   if(rtn != 0x42) {
+      //     printf("🔥 tid %d \n", child->tid);
+      //   }
       list_remove(&child->elem);
       sema_init(&parent->wait_sema, 0);
       free(child);
@@ -342,8 +342,8 @@ void process_exit(void) {
 /* Clear file sema. This function is called
  * when page fault exception occurs. */
 void clear_process_file_sema(void) {
-  if (file_sema.value == 0) {
-    sema_up(&file_sema);
+  if (load_sema.value == 0) {
+    sema_up(&load_sema);
   }
 }
 
@@ -837,14 +837,12 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 static bool lazy_load_segment(struct page *page, void *aux) {
   struct thread *curr = thread_current();
   void *upage = page->va;
-  sema_down(&file_sema);
 
   /* Get a page of memory. */
   struct frame *frame = page->frame;
   void *kva = frame->kva;
   if (frame == NULL || kva == NULL) {
     printf("process.c:827 No frame is allocated.\n");
-    sema_up(&file_sema);
     return false;
   }
 
@@ -855,16 +853,17 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   off_t ofs = file_info->ofs;
 
   /* Load this page. */
+  sema_down(&load_sema);
   file_seek(file, ofs);
   if (file_read(file, kva, bytes) != (int)bytes) {
     printf("process.c:838 File is not read properly.\n");
-    sema_up(&file_sema);
+    sema_up(&load_sema);
     return false;
   }
+  sema_up(&load_sema);
 
   /* Free file info. */
   free(file_info);
-  sema_up(&file_sema);
   return true;
 }
 

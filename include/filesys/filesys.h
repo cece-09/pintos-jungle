@@ -17,4 +17,12 @@ bool filesys_create (const char *name, off_t initial_size);
 struct file *filesys_open (const char *name);
 bool filesys_remove (const char *name);
 
+/* === Wrapper functions with lock. === */
+void filesys_close(struct file *file);
+off_t filesys_read(struct file *file, void *buf, off_t size);
+off_t filesys_write(struct file *file, const void *buf, off_t size);
+off_t filesys_length(struct file *file);
+void filesys_seek(struct file *file, off_t pos);
+off_t filesys_tell(struct file *file);
+
 #endif /* filesys/filesys.h */

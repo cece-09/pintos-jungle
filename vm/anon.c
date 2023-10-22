@@ -181,6 +181,13 @@ static void anon_destroy(struct page *page) {
   return;
 }
 
+/* Called in supplemental table copy. */
+void anon_swap_table_push(size_t slot, struct page *page) {
+  ASSERT(slot <= MAX_SLOTS);
+  ASSERT(slot != SLOT_INIT);
+  return swap_table_push(slot, page);
+}
+
 /* Find free disk slot. */
 static size_t allocate_slot() {
   lock_acquire(&slot_lock);

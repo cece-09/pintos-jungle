@@ -13,6 +13,7 @@
 static struct semaphore fault_sema;
 static void spt_free_page(struct hash_elem *, void *);
 static void spt_copy_page(struct hash_elem *, void *);
+static void spt_copy_file(struct page *src, struct page *dsc);
 static uint64_t spt_hash_func(const struct hash_elem *, void *);
 static bool spt_hash_less_func(const struct hash_elem *,
                                const struct hash_elem *, void *);
@@ -390,6 +391,20 @@ static void spt_free_page(struct hash_elem *e, void *aux UNUSED) {
   if (page) vm_dealloc_page(page);
 }
 
+/* Duplicate file if page is head. */
+static void spt_copy_file(struct page *src, struct page *dsc) {
+  ASSERT(page_get_type(src) == VM_FILE)
+  ASSERT(page_get_type(dsc) == VM_FILE)
+
+  struct file_page *src_fp = get_file_page(src);
+  struct file_page *dsc_fp = get_file_page(dsc);
+
+  /* If head page of file-backed pages, duplicate file. */
+  if (is_file_head(src, src_fp)) {
+    dsc_fp->file = file_duplicate(src_fp->file);
+  }
+}
+
 /* Hash action function which copies a single page. */
 static void spt_copy_page(struct hash_elem *e, void *aux) {
   struct supplemental_page_table *dsc_spt =
@@ -412,44 +427,64 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
 
   switch (page_get_type(src_page)) {
     case VM_ANON:
-      /* Anon-uninitialized pages are segment pages. */
       if (!pg_present(src_page)) {
-        struct file_info *src_aux = src_page->uninit.aux;
-        struct file_info *dsc_aux = calloc(1, sizeof(struct file_info));
-        memcpy(dsc_aux, src_aux, sizeof(struct file_info));
-        dsc_page->uninit.aux = dsc_aux;
-        return;
+        if (!pg_init(src_page)) {
+          /* Uninitialized anon pages are segment pages. */
+          struct file_info *src_aux = src_page->uninit.aux;
+          struct file_info *dsc_aux = calloc(1, sizeof(struct file_info));
+          memcpy(dsc_aux, src_aux, sizeof(struct file_info));
+          dsc_page->uninit.aux = dsc_aux;
+          return;
+        }
+
+        /* Swapped out anon page. */
+        size_t slot = dsc_page->anon.slot;
+        anon_swap_table_push(slot, dsc_page);
+
+      } else {
+        /* Present anon page. */
+        dsc_page->frame = src_page->frame;
+        struct frame *dsc_frame = dsc_page->frame;
+
+        ASSERT(dsc_frame && dsc_frame->kva);
+        list_push_back(&dsc_frame->pages, &dsc_page->frame_elem);
       }
       break;
+    
     case VM_FILE:
       if (!pg_present(src_page)) {
-        struct file_page *src_aux = src_page->uninit.aux;
-        struct file_page *dsc_aux = calloc(1, sizeof(struct file_page));
-        memcpy(dsc_aux, src_aux, sizeof(struct file_page));
-        dsc_page->uninit.aux = dsc_aux;
+        /* Uninitialized file-backed page. */
+        if (!pg_init(src_page)) {
+          struct file_page *src_aux = src_page->uninit.aux;
+          struct file_page *dsc_aux = calloc(1, sizeof(struct file_page));
+          memcpy(dsc_aux, src_aux, sizeof(struct file_page));
+          dsc_page->uninit.aux = dsc_aux;
+          spt_copy_file(src_page, dsc_page);
 
-        /* If head page of file-backed pages, duplicate file. */
-        if (src_page->va == src_aux->map_addr) {
-          dsc_aux->file = file_duplicate(src_aux->file);
+          /* Return immediately. */
+          return;
         }
-        return;
+
+        /* Swapped out file-backed page. */
+        size_t slot = dsc_page->file.slot;
+        file_swap_table_push(slot, dsc_page);
+
+      } else {
+        /* Present file-backed page. */
+        dsc_page->frame = src_page->frame;
+        struct frame *dsc_frame = dsc_page->frame;
+
+        ASSERT(dsc_frame && dsc_frame->kva);
+        list_push_back(&dsc_frame->pages, &dsc_page->frame_elem);
       }
 
-      /* If head page of file-backed pages, duplicate file. */
-      if (is_file_head(src_page, &src_page->file)) {
-        dsc_page->file.file = file_duplicate(src_page->file.file);
-      }
+      /* Copy file if the page is head-page. */
+      spt_copy_file(src_page, dsc_page);
+      break;
 
     default:
       break;
   }
-
-  /* Copy-on-write. */
-  struct frame *src_frame = src_page->frame;
-  list_push_back(&src_frame->pages, &dsc_page->frame_elem);
-
-  /* Link with frame. */
-  dsc_page->frame = src_page->frame;
 
   /* Set write-protect. */
   src_page->flags = src_page->flags & ~PTE_W;
