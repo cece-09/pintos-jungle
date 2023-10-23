@@ -112,7 +112,6 @@ bool filesys_remove(const char *name) {
 }
 
 /* ==== Wrapper functions with lock. ==== */
-
 void filesys_close(struct file *file) {
   lock_acquire(&filesys_lock);
   file_close(file);

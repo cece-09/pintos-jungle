@@ -97,6 +97,9 @@ static bool anon_swap_in(struct page *page, void *kva) {
   disk_sector_t sec = slot * SEC_PER_PAGE;
   do_disk_io(sec, SEC_PER_PAGE, kva, disk_read);
 
+  /* Set this page's access bit. */
+  pml4_set_accessed(page->thread->pml4, page->va, true);
+
   /* Set all linked pages present. */
   while (!swap_table_empty(slot)) {
     page = swap_table_pop(slot);
@@ -107,7 +110,6 @@ static bool anon_swap_in(struct page *page, void *kva) {
     page->flags = page->flags | PTE_P;
     vm_map_frame(page, frame);
     vm_install_page(page, page->thread);
-
 
     /* Unlink with disk slot. */
     page->anon.slot = SLOT_INIT;
@@ -124,9 +126,11 @@ static bool anon_swap_out(struct page *page) {
   void *kva = page->frame->kva;
   ASSERT(frame && kva)
 
+
   /* Find free disk sector */
   size_t slot = allocate_slot();
   if (slot == BITMAP_ERROR) {
+    printf("Swap disk out of memory.\n");
     return false;
   }
 
@@ -146,6 +150,7 @@ static bool anon_swap_out(struct page *page) {
     /* Unlink with frame. */
     page->frame = NULL;
     page->flags = page->flags & ~PTE_P;
+    pml4_set_accessed(t->pml4, page->va, false);
     pml4_clear_page(t->pml4, page->va);
 
     /* Link with disk slot. */
@@ -159,6 +164,7 @@ static bool anon_swap_out(struct page *page) {
 
 /* Destroy the anonymous page. PAGE will be freed by the caller. */
 static void anon_destroy(struct page *page) {
+  /* If page is swapped out */
   if (!pg_present(page)) {
     size_t slot = page->file.slot;
     if (!swap_table_remove(slot, page)) {

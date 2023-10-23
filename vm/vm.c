@@ -24,6 +24,7 @@ static uint64_t spt_hash_func(const struct hash_elem *, void *);
 static bool spt_hash_less_func(const struct hash_elem *,
                                const struct hash_elem *, void *);
 
+static struct list_elem *clock_hand;
 static struct list frame_table;
 static struct lock frame_lock;
 
@@ -38,8 +39,13 @@ void vm_init(void) {
   register_inspect_intr();
   /* DO NOT MODIFY UPPER LINES. */
 
-  list_init(&frame_table);
   lock_init(&frame_lock);
+
+  /* Create frame table as CLL. */
+  list_init(&frame_table);
+  clock_hand = &frame_table.head;
+  frame_table.head.prev = &frame_table.tail;
+  frame_table.tail.next = &frame_table.head;
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -198,7 +204,8 @@ static void clear_access_pages(struct frame *frame) {
 
 /* Get the struct frame, that will be evicted. */
 static struct frame *vm_get_victim(void) {
-  struct thread *curr = thread_current();
+  struct list_elem *head = &frame_table.head;
+  struct list_elem *tail = &frame_table.tail;
 
   if (list_empty(&frame_table)) {
     PANIC("No entry in frame table.");
@@ -206,28 +213,33 @@ static struct frame *vm_get_victim(void) {
 
   lock_acquire(&frame_lock);
 
-  struct list_elem *next = list_pop_front(&frame_table);
-  struct list_elem *start = next;
-  struct frame *victim = list_entry(next, struct frame, elem);
-  struct frame *frame;
+  struct list_elem *curr = clock_hand;
+  size_t frame_access = SIZE_MAX;
+  size_t least_access = SIZE_MAX;
 
-  list_push_back(&frame_table, &victim->elem);
+  struct frame *frame = NULL;
+  struct frame *victim = NULL;
 
-  do {
-    next = list_pop_front(&frame_table);
-    frame = list_entry(next, struct frame, elem);
+  /* Clock algorithm with CLL */
+  while (frame_access != 0) {
+    if (curr == head || curr == tail) {
+      curr = list_next(curr);
+      continue;
+    }
 
-    if (get_access_pages(frame) < get_access_pages(victim)) {
-    // if (frame->page_cnt < victim->page_cnt) {
-      /* Take frame which has leaset accessed pages as victim. */
+    frame = list_entry(curr, struct frame, elem);
+    frame_access = get_access_pages(frame);
+    clear_access_pages(frame);
+
+    if (frame_access < least_access) {
+      least_access = frame_access;
       victim = frame;
     }
 
-    /* Clear accessed bits of all mapped pages. */
-    clear_access_pages(frame);
-    list_push_back(&frame_table, &frame->elem);
-  } while (next != start);
+    curr = list_next(curr);
+  }
 
+  clock_hand = curr;
   list_remove(&victim->elem);
 
   lock_release(&frame_lock);
@@ -470,7 +482,10 @@ static void spt_copy_file(struct page *src, struct page *dsc) {
 
   /* If head page of file-backed pages, duplicate file. */
   if (is_file_head(src, src_fp)) {
-    dsc_fp->file = file_duplicate(src_fp->file);
+    dsc_fp->file = filesys_duplicate(src_fp->file);
+    if (dsc_fp->file == NULL) {
+      printf("File duplication failed.\n");
+    }
   }
 }
 
@@ -481,11 +496,16 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
   struct hash *dsc_hash = &dsc_spt->hash;
   struct page *src_page = hash_entry(e, struct page, table_elem);
 
-  /* Copy spt entries. */
   struct page *dsc_page = calloc(1, sizeof(struct page));
+  if (dsc_page == NULL) {
+    printf("Child page allocation failed\n");
+    return;
+  }
+
+  /* Copy spt entries. */
   memcpy(dsc_page, src_page, sizeof(struct page));
 
-  /* Deconnect from parent's hash table. */
+  /* Disconnect from parent's hash table. */
   memset(&dsc_page->table_elem, 0, sizeof(struct hash_elem));
   memset(&dsc_page->frame_elem, 0, sizeof(struct list_elem));
   hash_insert(dsc_hash, &dsc_page->table_elem);
@@ -501,6 +521,10 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
           /* Uninitialized anon pages are segment pages. */
           struct file_info *src_aux = src_page->uninit.aux;
           struct file_info *dsc_aux = calloc(1, sizeof(struct file_info));
+          if (dsc_aux == NULL) {
+            printf("Child uninit page aux allocation failed\n");
+            return;
+          }
           memcpy(dsc_aux, src_aux, sizeof(struct file_info));
           dsc_page->uninit.aux = dsc_aux;
           return;
@@ -522,6 +546,11 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
         if (!pg_init(src_page)) {
           struct file_page *src_aux = src_page->uninit.aux;
           struct file_page *dsc_aux = calloc(1, sizeof(struct file_page));
+          if (dsc_aux == NULL) {
+            printf("Child uninit page aux allocation failed\n");
+            return;
+          }
+
           memcpy(dsc_aux, src_aux, sizeof(struct file_page));
           dsc_page->uninit.aux = dsc_aux;
           spt_copy_file(src_page, dsc_page);
@@ -555,6 +584,9 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
   src_page->flags = src_page->flags | PG_COW;
   dsc_page->flags = dsc_page->flags | PG_COW;
 
-  vm_install_page(src_page, src_page->thread);
-  vm_install_page(dsc_page, dsc_page->thread);
+  /* Install in pml4 if swap-in pages. */
+  if (pg_present(src_page)) {
+    vm_install_page(src_page, src_page->thread);
+    vm_install_page(dsc_page, dsc_page->thread);
+  }
 }

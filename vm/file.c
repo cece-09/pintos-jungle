@@ -111,6 +111,9 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
     return false;
   }
 
+  /* Set this page's access bit. */
+  pml4_set_accessed(page->thread->pml4, page->va, true);
+
   /* Set all linked pages present. */
   while (!swap_table_empty(slot)) {
     page = swap_table_pop(slot);
@@ -165,6 +168,7 @@ static bool file_backed_swap_out(struct page *page) {
     page->frame = NULL;
     page->flags = page->flags & ~PTE_P;
     pml4_clear_page(t->pml4, page->va);
+    pml4_set_accessed(t->pml4, page->va, false);
     pml4_set_dirty(t->pml4, page->va, false);
 
     /* Link with disk slot. */

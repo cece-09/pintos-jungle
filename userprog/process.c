@@ -185,6 +185,7 @@ static void __do_fork(void *aux) {
   struct thread *curr = thread_current();
   bool succ = true;
 
+
   /* Mark that current thread is in forking process. */
   curr->exit_code = FORK_SUCC;
 
@@ -203,6 +204,7 @@ static void __do_fork(void *aux) {
 
   /* Duplicate exec file. */
   curr->exec_file = filesys_duplicate(parent->exec_file);
+  printf("🔥 do fork?\n");
 
 #ifdef VM
   supplemental_page_table_init(&curr->spt);
