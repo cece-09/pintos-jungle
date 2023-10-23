@@ -116,7 +116,6 @@ tid_t process_fork(const char *name, struct intr_frame *if_) {
 
   /* If thread_create fails, return TID_ERROR */
   if (tid == TID_ERROR) {
-    printf("🔥 child creation failed.\n");
     return TID_ERROR;
   }
 
@@ -125,12 +124,9 @@ tid_t process_fork(const char *name, struct intr_frame *if_) {
 
   /* If fork is not successful, return TID_ERROR. */
   struct thread_child *child = thread_get_child(&parent->children, tid);
-  if (!child) {
-    printf("🔥 no child.\n");
-    return TID_ERROR;
-  }
+  if (!child)  return TID_ERROR;
+
   if (child->addr->exit_code == FORK_FAIL) {
-    printf("🔥 fork failed.\n");
     return TID_ERROR;
   }
   return tid;
@@ -204,7 +200,6 @@ static void __do_fork(void *aux) {
 
   /* Duplicate exec file. */
   curr->exec_file = filesys_duplicate(parent->exec_file);
-  printf("🔥 do fork?\n");
 
 #ifdef VM
   supplemental_page_table_init(&curr->spt);
@@ -270,9 +265,9 @@ int process_exec(void *f_name) {
 #endif
 
   /* And then load the binary */
-  lock_acquire(&load_lock);
+//   lock_acquire(&load_lock);
   success = load(file_name, &_if);
-  lock_release(&load_lock);
+//   lock_release(&load_lock);
 
   /* If load failed, quit. */
   palloc_free_page(file_name);
@@ -583,7 +578,7 @@ static bool load(const char *file_name, struct intr_frame *if_) {
   file_deny_write(file);
 
   /* Read and verify executable header. */
-  if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
+  if (filesys_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
       memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 ||
       ehdr.e_machine != 0x3E  // amd64
       || ehdr.e_version != 1 || ehdr.e_phentsize != sizeof(struct Phdr) ||
@@ -597,10 +592,10 @@ static bool load(const char *file_name, struct intr_frame *if_) {
   for (i = 0; i < ehdr.e_phnum; i++) {
     struct Phdr phdr;
 
-    if (file_ofs < 0 || file_ofs > file_length(file)) goto done;
-    file_seek(file, file_ofs);
+    if (file_ofs < 0 || file_ofs > filesys_length(file)) goto done;
+    filesys_seek(file, file_ofs);
 
-    if (file_read(file, &phdr, sizeof phdr) != sizeof phdr) goto done;
+    if (filesys_read(file, &phdr, sizeof phdr) != sizeof phdr) goto done;
     file_ofs += sizeof phdr;
     switch (phdr.p_type) {
       case PT_NULL:
@@ -699,7 +694,7 @@ static bool load(const char *file_name, struct intr_frame *if_) {
 done:
   /* We arrive here whether the load is successful or not. */
   if (!success)
-    file_close(file);
+    filesys_close(file);
   else {
     /* Write exec file of this process. */
     t->exec_file = file;
@@ -714,7 +709,7 @@ static bool validate_segment(const struct Phdr *phdr, struct file *file) {
   if ((phdr->p_offset & PGMASK) != (phdr->p_vaddr & PGMASK)) return false;
 
   /* p_offset must point within FILE. */
-  if (phdr->p_offset > (uint64_t)file_length(file)) return false;
+  if (phdr->p_offset > (uint64_t)filesys_length(file)) return false;
 
   /* p_memsz must be at least as big as p_filesz. */
   if (phdr->p_memsz < phdr->p_filesz) return false;
@@ -806,7 +801,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
   ASSERT(pg_ofs(upage) == 0);
   ASSERT(ofs % PGSIZE == 0);
 
-  file_seek(file, ofs);
+  filesys_seek(file, ofs);
   while (read_bytes > 0 || zero_bytes > 0) {
     /* Do calculate how to fill this page.
      * We will read PAGE_READ_BYTES bytes from FILE
@@ -819,7 +814,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
     if (kpage == NULL) return false;
 
     /* Load this page. */
-    if (file_read(file, kpage, page_read_bytes) != (int)page_read_bytes) {
+    if (filesys_read(file, kpage, page_read_bytes) != (int)page_read_bytes) {
       palloc_free_page(kpage);
       return false;
     }
@@ -869,13 +864,11 @@ static bool lazy_load_segment(struct page *page, void *aux) {
 
   /* Load this page. */
   bool read_succ = true;
-  lock_acquire(&load_lock);
-  file_seek(file, ofs);
-  if (file_read(file, kva, bytes) != (int)bytes) {
+  filesys_seek(file, ofs);
+  if (filesys_read(file, kva, bytes) != (int)bytes) {
     printf("process.c:838 File is not read properly.\n");
     read_succ = false;
   }
-  lock_release(&load_lock);
   if (!read_succ) return false;
 
   /* Free file info. */

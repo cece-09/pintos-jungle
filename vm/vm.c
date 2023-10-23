@@ -70,6 +70,7 @@ static struct frame *vm_evict_frame(void);
 void vm_map_frame(struct page *page, struct frame *frame) {
   ASSERT(frame && frame->kva)
 
+  page->frame = frame;  // TODO: ??
   list_push_back(&frame->pages, &page->frame_elem);
   frame->page_cnt++;
 }
@@ -365,7 +366,9 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   /* Validate stack growth. */
   if (STACK_LIMIT < addr && addr < spt->stack_bottom) {
     /* If current stack is not full, not a stack growth. */
-    if (curr_rsp != addr) return false;
+    if (curr_rsp != addr) {
+      return false;
+    }
     /* If stack growth */
     return vm_stack_growth(upage);
   }

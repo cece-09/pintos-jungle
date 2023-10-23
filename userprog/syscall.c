@@ -42,6 +42,7 @@ static struct file *read_fdt(int fd);
 static void set_fdt(int fd, struct file *file);
 static bool pg_write_protect(void *va, size_t size);
 static void error_exit(int exit_code);
+static void trigger_fault(void *buffer, size_t size);
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -49,6 +50,7 @@ void syscall_handler(struct intr_frame *);
 /* Syscall table. */
 typedef uint64_t (*sys_func)(struct sys_args);
 static sys_func syscall[24];
+
 #define zero (uint64_t)0
 #define error (uint64_t)(-1)
 
@@ -228,6 +230,9 @@ uint64_t read(struct sys_args args) {
   if (file == NULL) {
     return error;
   }
+  
+  /* Deliverately trigger page fault. */
+  trigger_fault(buffer, size);
 
   return (uint64_t)filesys_read(file, buffer, size);
 }
@@ -261,6 +266,9 @@ uint64_t write(struct sys_args args) {
   if (file == NULL || file->deny_write) {
     return error;
   }
+
+  /* Deliverately trigger page fault. */
+  trigger_fault(buffer, size);
 
   return (uint64_t)filesys_write(file, buffer, size);
 }
@@ -337,7 +345,6 @@ uint64_t fork(struct sys_args args) {
 /* Wait for child tid to exit. */
 uint64_t wait(struct sys_args args) {
   tid_t tid = (tid_t)args.a1;
-//   ASSERT(tid >= 0);
 
   return (uint64_t)process_wait(tid);
 }
@@ -521,7 +528,6 @@ static bool pg_write_protect(void *va, size_t size) {
   for (void *p = va; p < va + size; p += PGSIZE) {
     uint64_t *pte = pml4e_walk(curr->pml4, pg_round_down(p), 0);
     if (*pte != NULL && !is_writable(pte)) {
-
       struct page *page = spt_find_page(&curr->spt, va);
       return !vm_handle_wp(page);
     }
@@ -534,4 +540,13 @@ static bool pg_write_protect(void *va, size_t size) {
 static void error_exit(int exit_code) {
   thread_current()->exit_code = exit_code;
   thread_exit();
+}
+
+/* Make fault for lazy loading. */
+static void trigger_fault(void *buffer, size_t size) {
+  void *p = pg_round_down(buffer);
+  for (; p < (buffer + size); p += PGSIZE) {
+    volatile char *ptr = (char *)(p);
+    *ptr = *ptr;
+  }
 }

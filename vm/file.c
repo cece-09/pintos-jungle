@@ -330,8 +330,9 @@ static bool lazy_load_file(struct page *page, void *aux) {
 
   /* Read file to page. */
   bool succ;
+  // TODO: lock?
   lock_acquire(&load_lock);
-  succ = do_file_io(page, head, file_read);
+  succ = do_file_io(page, head, filesys_read);
   lock_release(&load_lock);
 
   return succ;
