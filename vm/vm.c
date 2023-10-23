@@ -16,7 +16,9 @@ static bool spt_hash_less_func(const struct hash_elem *,
 static void spt_free_page(struct hash_elem *, void *);
 static void spt_copy_page(struct hash_elem *, void *);
 
+static struct lock frame_lock;
 static struct list frame_table;
+static struct list_elem* clock_hand;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -29,7 +31,14 @@ void vm_init(void) {
   register_inspect_intr();
   /* DO NOT MODIFY UPPER LINES. */
 
+  /* Init lock. */
+  lock_init(&frame_lock);
+
+  /* Create frame table as CLL. */
   list_init(&frame_table);
+  clock_hand = &frame_table.head;
+  frame_table.head.prev = &frame_table.tail;
+  frame_table.tail.next = &frame_table.head;
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -150,28 +159,44 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page) {
   return true;
 }
 
+
 /* Get the struct frame, that will be evicted. */
 static struct frame *vm_get_victim(void) {
-  struct thread *curr = thread_current();
+  struct thread* t = thread_current();
+  struct list_elem *head = &frame_table.head;
+  struct list_elem *tail = &frame_table.tail;
 
   if (list_empty(&frame_table)) {
-    PANIC("No entry in frame table!!!");
+    PANIC("No entry in frame table.");
   }
 
-  struct list_elem *next = list_pop_front(&frame_table);
-  struct frame *victim = list_entry(next, struct frame, elem);
+  lock_acquire(&frame_lock);
 
-  while (pml4_is_accessed(curr->pml4, victim->page->va)) {
-    pml4_set_accessed(curr->pml4, victim->page->va, false);
-    list_push_back(&frame_table, &victim->elem);
+  struct list_elem *curr = clock_hand;
+  struct frame *victim = NULL;
+  bool access = true;
 
-    /* Next candidate. */
-    next = list_pop_front(&frame_table);
-    victim = list_entry(next, struct frame, elem);
+  /* Clock algorithm with CLL */
+  while (access != false) {
+    if (curr == head || curr == tail) {
+      curr = list_next(curr);
+      continue;
+    }
+
+    victim = list_entry(curr, struct frame, elem);
+    access = pml4_is_accessed(t->pml4, victim->page->va);
+    pml4_set_accessed(t->pml4, victim->page->va, false);
+
+    curr = list_next(curr);
   }
 
+  clock_hand = curr;
+  list_remove(&victim->elem);
+
+  lock_release(&frame_lock);
   return victim;
 }
+
 
 /* Evict one page and return the corresponding frame.
  * Return NULL on error.*/
@@ -229,7 +254,6 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
-  
   struct thread *curr = thread_current();
   struct supplemental_page_table *spt = &curr->spt;
   void *upage = pg_round_down(addr);
@@ -395,7 +419,7 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
     default:
       break;
   }
-  
+
   /* Claim page if present. */
   // TODO: handle copy-on-write.
   struct frame *dsc_frame = vm_get_frame();
