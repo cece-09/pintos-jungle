@@ -10,6 +10,12 @@
 #include "threads/vaddr.h"
 #include "vm/inspect.h"
 
+/* === Helpers === */
+static void iterate_get_access(struct list_elem *e, void *aux);
+static void iterate_clear_access(struct list_elem *e, void *aux);
+static size_t get_access_pages(struct frame *frame);
+static void clear_access_pages(struct frame *frame);
+
 static struct semaphore fault_sema;
 static void spt_free_page(struct hash_elem *, void *);
 static void spt_copy_page(struct hash_elem *, void *);
@@ -19,6 +25,7 @@ static bool spt_hash_less_func(const struct hash_elem *,
                                const struct hash_elem *, void *);
 
 static struct list frame_table;
+static struct lock frame_lock;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -32,7 +39,7 @@ void vm_init(void) {
   /* DO NOT MODIFY UPPER LINES. */
 
   list_init(&frame_table);
-  sema_init(&fault_sema, 1);
+  lock_init(&frame_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -53,13 +60,30 @@ static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
 
+/* Push into frame's page list. */
+void vm_map_frame(struct page *page, struct frame *frame) {
+  ASSERT(frame && frame->kva)
+
+  list_push_back(&frame->pages, &page->frame_elem);
+  frame->page_cnt++;
+}
+
+/* Remove from frame's page list. */
+void vm_unmap_frame(struct page *page) {
+  ASSERT(page->frame);
+
+  struct frame *frame = page->frame;
+  list_remove(&page->frame_elem);
+  page->frame = NULL;
+  frame->page_cnt--;
+}
+
 /* Install page in current thread's pml4. */
 bool vm_install_page(struct page *page, struct thread *t) {
   bool writable = pg_writable(page);
   void *kva = page->frame->kva;
   ASSERT(page && kva)
 
-  // TODO: logic 수정
   return pml4_set_page(t->pml4, page->va, kva, writable);
 }
 
@@ -144,6 +168,34 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page) {
   return true;
 }
 
+/* List-iterator function in get_access_pages. */
+static void iterate_get_access(struct list_elem *e, void *aux) {
+  struct page *page = list_entry(e, struct page, frame_elem);
+  size_t *access_cnt = (size_t *)aux;
+  *access_cnt += pml4_is_accessed(page->thread->pml4, page->va);
+}
+
+/* List-iterator function in clear_access_pages. */
+static void iterate_clear_access(struct list_elem *e, void *aux) {
+  struct page *page = list_entry(e, struct page, frame_elem);
+  pml4_set_accessed(page->thread->pml4, page->va, false);
+}
+
+/* Get count of accessed pages mapped with this frame. */
+static size_t get_access_pages(struct frame *frame) {
+  ASSERT(!list_empty(&frame->pages));
+
+  size_t access_pages = 0;
+  list_iterate(&frame->pages, iterate_get_access, &access_pages);
+  return access_pages;
+}
+
+/* Clear all accessed pages' access bits mapped with this frame. */
+static void clear_access_pages(struct frame *frame) {
+  ASSERT(!list_empty(&frame->pages));
+  list_iterate(&frame->pages, iterate_clear_access, NULL);
+}
+
 /* Get the struct frame, that will be evicted. */
 static struct frame *vm_get_victim(void) {
   struct thread *curr = thread_current();
@@ -152,19 +204,33 @@ static struct frame *vm_get_victim(void) {
     PANIC("No entry in frame table.");
   }
 
-  // TODO: 일단 FIFO
+  lock_acquire(&frame_lock);
+
   struct list_elem *next = list_pop_front(&frame_table);
+  struct list_elem *start = next;
   struct frame *victim = list_entry(next, struct frame, elem);
+  struct frame *frame;
 
-  //   while (pml4_is_accessed(curr->pml4, victim->page->va)) {
-  //     pml4_set_accessed(curr->pml4, victim->page->va, false);
-  //     list_push_back(&frame_table, &victim->elem);
+  list_push_back(&frame_table, &victim->elem);
 
-  //     /* Next candidate. */
-  //     next = list_pop_front(&frame_table);
-  //     victim = list_entry(next, struct frame, elem);
-  //   }
+  do {
+    next = list_pop_front(&frame_table);
+    frame = list_entry(next, struct frame, elem);
 
+    if (get_access_pages(frame) < get_access_pages(victim)) {
+    // if (frame->page_cnt < victim->page_cnt) {
+      /* Take frame which has leaset accessed pages as victim. */
+      victim = frame;
+    }
+
+    /* Clear accessed bits of all mapped pages. */
+    clear_access_pages(frame);
+    list_push_back(&frame_table, &frame->elem);
+  } while (next != start);
+
+  list_remove(&victim->elem);
+
+  lock_release(&frame_lock);
   return victim;
 }
 
@@ -174,6 +240,7 @@ static struct frame *vm_evict_frame(void) {
   struct frame *victim = vm_get_victim();
 
   ASSERT(!list_empty(&victim->pages));
+
   struct list_elem *front = list_front(&victim->pages);
   struct page *page = list_entry(front, struct page, frame_elem);
 
@@ -225,7 +292,8 @@ static bool vm_stack_growth(void *addr) {
     return false;
   }
 
-  struct supplemental_page_table *spt = &thread_current()->spt;
+  struct supplemental_page_table *spt;
+  spt = &thread_current()->spt;
   spt->stack_bottom = addr;
   return vm_alloc_page(VM_ANON, addr, true);
 }
@@ -241,14 +309,15 @@ bool vm_handle_wp(struct page *page) {
 
   /* Unlink from old frame. */
   struct frame *old_frame = page->frame;
-  list_remove(&page->frame_elem);
+  vm_unmap_frame(page);
 
   /* If this page was the last,
    * Re-link with frame and return. */
   if (list_empty(&old_frame->pages)) {
-    page->flags = page->flags & ~PG_COW;
     page->flags = page->flags | PTE_W;
-    list_push_back(&old_frame->pages, &page->frame_elem);
+    page->flags = page->flags & ~PG_COW;
+
+    vm_map_frame(page, old_frame);
     return vm_install_page(page, page->thread);
   }
 
@@ -346,7 +415,7 @@ void supplemental_page_table_init(struct supplemental_page_table *spt) {
   return;
 }
 
-/* SPT - Copy supplemental page table from src to dst */
+/* Copy supplemental page table from src to dst. */
 bool supplemental_page_table_copy(struct supplemental_page_table *dsc,
                                   struct supplemental_page_table *src) {
   /* Copy stack bottom. */
@@ -359,7 +428,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dsc,
   return true;
 }
 
-/* Free the resource hold by the supplemental page table */
+/* Free the resource hold by the supplemental page table. */
 void supplemental_page_table_kill(struct supplemental_page_table *spt) {
   if (!spt) return;
 
@@ -443,14 +512,10 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
 
       } else {
         /* Present anon page. */
-        dsc_page->frame = src_page->frame;
-        struct frame *dsc_frame = dsc_page->frame;
-
-        ASSERT(dsc_frame && dsc_frame->kva);
-        list_push_back(&dsc_frame->pages, &dsc_page->frame_elem);
+        vm_map_frame(dsc_page, src_page->frame);
       }
       break;
-    
+
     case VM_FILE:
       if (!pg_present(src_page)) {
         /* Uninitialized file-backed page. */
@@ -471,11 +536,7 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
 
       } else {
         /* Present file-backed page. */
-        dsc_page->frame = src_page->frame;
-        struct frame *dsc_frame = dsc_page->frame;
-
-        ASSERT(dsc_frame && dsc_frame->kva);
-        list_push_back(&dsc_frame->pages, &dsc_page->frame_elem);
+        vm_map_frame(dsc_page, src_page->frame);
       }
 
       /* Copy file if the page is head-page. */

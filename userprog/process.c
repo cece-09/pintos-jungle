@@ -38,7 +38,7 @@ static void duplicate_fdt(struct thread *, struct thread *);
 static bool load(const char *file_name, struct intr_frame *if_);
 
 /* Filesys sema. Used in process.c and vm/file.c */
-static struct semaphore load_sema;
+static struct lock load_lock;
 
 /* General process initializer for initd and other process. */
 static bool process_init(void) {
@@ -62,7 +62,8 @@ tid_t process_create_initd(const char *file_name) {
   char *fn_copy;
   tid_t tid;
 
-  sema_init(&load_sema, 1);
+  /* Init load lock. */
+  lock_init(&load_lock);
 
   /* Make a copy of FILE_NAME.
    * Otherwise there's a race between the caller and load(). */
@@ -114,15 +115,22 @@ tid_t process_fork(const char *name, struct intr_frame *if_) {
   tid_t tid = thread_create(name, PRI_DEFAULT, __do_fork, parent);
 
   /* If thread_create fails, return TID_ERROR */
-  if (tid == TID_ERROR) return TID_ERROR;
+  if (tid == TID_ERROR) {
+    printf("🔥 child creation failed.\n");
+    return TID_ERROR;
+  }
 
   /* Lock parent. */
   sema_down(&parent->fork_sema);
 
   /* If fork is not successful, return TID_ERROR. */
   struct thread_child *child = thread_get_child(&parent->children, tid);
-  if (!child) return TID_ERROR;
+  if (!child) {
+    printf("🔥 no child.\n");
+    return TID_ERROR;
+  }
   if (child->addr->exit_code == FORK_FAIL) {
+    printf("🔥 fork failed.\n");
     return TID_ERROR;
   }
   return tid;
@@ -186,6 +194,7 @@ static void __do_fork(void *aux) {
   /* Duplicate page table. */
   curr->pml4 = pml4_create();
   if (curr->pml4 == NULL) {
+    printf("pml4 creation failed\n");
     goto error;
   }
 
@@ -193,18 +202,24 @@ static void __do_fork(void *aux) {
   process_activate(curr);
 
   /* Duplicate exec file. */
-  curr->exec_file = file_duplicate(parent->exec_file);
+  curr->exec_file = filesys_duplicate(parent->exec_file);
 
 #ifdef VM
   supplemental_page_table_init(&curr->spt);
-  if (!supplemental_page_table_copy(&curr->spt, &parent->spt)) goto error;
+  if (!supplemental_page_table_copy(&curr->spt, &parent->spt)) {
+    printf("spt copy failed\n");
+    goto error;
+  }
 
 #else
   if (!pml4_for_each(parent->pml4, duplicate_pte, parent)) goto error;
 #endif
 
   /* Get new page for fdt. */
-  if (process_init() == false) goto error;
+  if (process_init() == false) {
+    printf("process_init failed\n");
+    goto error;
+  }
 
   /* Duplicate file descriptor table. */
   duplicate_fdt(parent, curr);
@@ -253,9 +268,9 @@ int process_exec(void *f_name) {
 #endif
 
   /* And then load the binary */
-  sema_down(&load_sema);
+  lock_acquire(&load_lock);
   success = load(file_name, &_if);
-  sema_up(&load_sema);
+  lock_release(&load_lock);
 
   /* If load failed, quit. */
   palloc_free_page(file_name);
@@ -291,9 +306,6 @@ int process_wait(tid_t child_tid) {
     /* If child exit, remove from list and return. */
     if (child->status == CHILD_EXIT) {
       rtn = child->rtn_value;
-      //   if(rtn != 0x42) {
-      //     printf("🔥 tid %d \n", child->tid);
-      //   }
       list_remove(&child->elem);
       sema_init(&parent->wait_sema, 0);
       free(child);
@@ -342,8 +354,9 @@ void process_exit(void) {
 /* Clear file sema. This function is called
  * when page fault exception occurs. */
 void clear_process_file_sema(void) {
-  if (load_sema.value == 0) {
-    sema_up(&load_sema);
+  struct thread *curr = thread_current();
+  if (load_lock.holder == curr) {
+    lock_release(&load_lock);
   }
 }
 
@@ -351,7 +364,7 @@ void clear_process_file_sema(void) {
 static void exec_file_cleanup(void) {
   struct thread *curr = thread_current();
   if (curr->exec_file) {
-    file_close(curr->exec_file);
+    filesys_close(curr->exec_file);
     curr->exec_file = NULL;
   }
 }
@@ -831,7 +844,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
  * If you want to implement the function for only project 2, implement it on
  * the upper block. */
 
-/* SPT - Load the segment from the file.
+/* Load the segment from the file.
  * This called when the first page fault occurs on address VA.
  * VA is available when calling this function. */
 static bool lazy_load_segment(struct page *page, void *aux) {
@@ -853,14 +866,15 @@ static bool lazy_load_segment(struct page *page, void *aux) {
   off_t ofs = file_info->ofs;
 
   /* Load this page. */
-  sema_down(&load_sema);
+  bool read_succ = true;
+  lock_acquire(&load_lock);
   file_seek(file, ofs);
   if (file_read(file, kva, bytes) != (int)bytes) {
     printf("process.c:838 File is not read properly.\n");
-    sema_up(&load_sema);
-    return false;
+    read_succ = false;
   }
-  sema_up(&load_sema);
+  lock_release(&load_lock);
+  if (!read_succ) return false;
 
   /* Free file info. */
   free(file_info);
@@ -888,7 +902,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
   ASSERT(pg_ofs(upage) == 0);
   ASSERT(ofs % PGSIZE == 0);
 
-  off_t read_start = ofs;  // 파일 읽기를 시작할 오프셋
+  off_t read_start = ofs;
 
   while (read_bytes > 0 || zero_bytes > 0) {
     /* Do calculate how to fill this page.

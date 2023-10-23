@@ -18,11 +18,13 @@ struct file *filesys_open (const char *name);
 bool filesys_remove (const char *name);
 
 /* === Wrapper functions with lock. === */
+off_t filesys_tell(struct file *file);
 void filesys_close(struct file *file);
-off_t filesys_read(struct file *file, void *buf, off_t size);
-off_t filesys_write(struct file *file, const void *buf, off_t size);
 off_t filesys_length(struct file *file);
 void filesys_seek(struct file *file, off_t pos);
-off_t filesys_tell(struct file *file);
+struct file *filesys_duplicate(struct file *file);
+off_t filesys_read(struct file *file, void *buf, off_t size);
+off_t filesys_write(struct file *file, const void *buf, off_t size);
+void clear_filesys_lock();
 
 #endif /* filesys/filesys.h */

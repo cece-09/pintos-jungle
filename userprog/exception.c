@@ -147,10 +147,11 @@ static void page_fault(struct intr_frame *f) {
 
   curr = thread_current();
 
-  /* Clear all file sema. */
+  /* Clear all semaphores and locks. */
   clear_process_file_sema();
   clear_syscall_file_sema();
   clear_vm_file_sema();
+  clear_filesys_lock();
   
 
   /* Handle exit situations. */

@@ -23,6 +23,7 @@ static struct page **swap_table;
 
 /* Semaphore for sector allocation. */
 static struct lock slot_lock;
+static struct lock disk_lock;
 
 /* Disk read & write func type. */
 typedef void (*disk_io)(struct disk *, disk_sector_t, const void *);
@@ -61,8 +62,9 @@ void vm_anon_init(void) {
   size_t page_cnt = (slots * sizeof(struct page *)) / 0x1000;
   swap_table = palloc_get_multiple(PAL_ZERO, page_cnt);
 
-  /* Initialize anon sema. */
+  /* Initialize locks. */
   lock_init(&slot_lock);
+  lock_init(&disk_lock);
 }
 
 /* Initialize the file mapping */
@@ -103,8 +105,9 @@ static bool anon_swap_in(struct page *page, void *kva) {
     /* Link with frame. */
     page->frame = frame;
     page->flags = page->flags | PTE_P;
+    vm_map_frame(page, frame);
     vm_install_page(page, page->thread);
-    list_push_back(&frame->pages, &page->frame_elem);
+
 
     /* Unlink with disk slot. */
     page->anon.slot = SLOT_INIT;
@@ -169,13 +172,14 @@ static void anon_destroy(struct page *page) {
   struct thread *t = page->thread;
   pml4_clear_page(t->pml4, page->va);
 
-  struct frame *frame = page->frame;
-  list_remove(&page->frame_elem);
+  /* Unlink with current frame. */
+  struct frame* frame = page->frame;
+  vm_unmap_frame(page);
 
   /* If page is the last, free frame. */
   if (list_empty(&frame->pages)) {
-    palloc_free_page(page->frame->kva);
-    free(page->frame);
+    palloc_free_page(frame->kva);
+    free(frame);
   }
 
   return;
@@ -207,10 +211,13 @@ static void free_slot(size_t slot) {
  * for NUM consecutive sectors. */
 static bool do_disk_io(disk_sector_t sector, size_t num, const void *kva,
                        disk_io func) {
+
+  lock_acquire(&disk_lock);
   int i = 0;
   for (; i < num; i++) {
     func(swap_disk, sector + i, kva + (i * DISK_SEC));
   }
+  lock_release(&disk_lock);
 }
 
 /* Push front into swap table. */
@@ -240,15 +247,21 @@ static struct page *swap_table_pop(size_t slot) {
 /* Returns if swap table is empty. */
 static bool swap_table_empty(size_t slot) {
   ASSERT(slot < MAX_SLOTS)
-  return (swap_table[slot] == NULL);
+  bool rtn;
+  lock_acquire(&slot_lock);
+  rtn = (swap_table[slot] == NULL);
+  lock_release(&slot_lock);
+  return rtn;
 }
 
 /* Remove page from swap table. */
 static struct page *swap_table_remove(size_t slot, struct page *page) {
   ASSERT(slot != SLOT_INIT);
 
+  lock_acquire(&slot_lock);
   struct page *before = swap_table[slot];
   if (before == page) {
+    lock_release(&slot_lock);
     return swap_table_pop(slot);
   }
 
@@ -256,10 +269,11 @@ static struct page *swap_table_remove(size_t slot, struct page *page) {
     before = before->next_swap;
     if (before == NULL) {
       /* Page is not found. */
+      lock_release(&slot_lock);
       return NULL;
     }
   }
-
   before->next_swap = page->next_swap;
+  lock_release(&slot_lock);
   return page;
 }

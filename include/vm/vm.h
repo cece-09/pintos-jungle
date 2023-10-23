@@ -87,6 +87,7 @@ struct page {
 struct frame {
   void *kva;             /* Kernel virtual address */
   struct list pages;     /* List of mapped pages. */
+  uint32_t page_cnt;     /* Count of mapped pages. */
   struct list_elem elem; /* List elem for frame table.*/
 };
 
@@ -150,5 +151,8 @@ void clear_vm_file_sema(void);
 bool vm_handle_wp(struct page *page);
 void vm_clear_frame_pages(struct page *page);
 bool vm_install_page(struct page *page, struct thread* t);
+
+void vm_unmap_frame(struct page *page);
+void vm_map_frame(struct page *page, struct frame* frame);
 
 #endif /* VM_VM_H */

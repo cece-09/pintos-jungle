@@ -300,7 +300,7 @@ bool lock_try_acquire(struct lock *lock) {
   return success;
 }
 
-// * iterate 내부 함수
+/* Iterate list and reset donate. */
 static void iterate_reset_donate(struct list_elem *elem, void *aux) {
   struct thread *curr = thread_current();
   struct thread *next = (struct thread *)aux;
@@ -319,7 +319,7 @@ static void iterate_reset_donate(struct list_elem *elem, void *aux) {
   t->holder = next;
 }
 
-// * lock 해제
+/* Release lock. */ 
 void lock_release(struct lock *lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));

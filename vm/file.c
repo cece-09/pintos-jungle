@@ -17,8 +17,8 @@ static struct bitmap *swap_slot;
 static struct page **swap_table;
 
 /* Control lazy load order. */
-static struct semaphore load_sema;
 static struct lock slot_lock;
+static struct lock load_lock;
 
 /* Read/Write function type. */
 typedef off_t (*file_io)(struct file *, const void *, off_t);
@@ -56,7 +56,7 @@ void vm_file_init(void) {
   swap_table = palloc_get_multiple(PAL_ZERO, page_cnt);
 
   /* Init filesys lock. */
-  sema_init(&load_sema, 1);
+  lock_init(&load_lock);
   lock_init(&slot_lock);
 }
 
@@ -98,7 +98,7 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
   size_t slot = page->anon.slot;
   if (slot == SLOT_INIT) {
     /* If page was never swapped out, just install. */
-    list_push_back(&frame->pages, &page->frame_elem);
+    vm_map_frame(page, frame);
     return vm_install_page(page, page->thread);
   }
 
@@ -106,11 +106,10 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
   ASSERT(head != NULL)
 
   /* Read from file to kva. */
-  bool succ;
-  //   sema_down(&file_sema);
-  succ = do_file_io(page, head, filesys_read);
-  //   sema_up(&file_sema);
-  if (!succ) return false;
+  if (!do_file_io(page, head, filesys_read)) {
+    printf("File read fail in file-backed swap-in\n");
+    return false;
+  }
 
   /* Set all linked pages present. */
   while (!swap_table_empty(slot)) {
@@ -120,8 +119,8 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
     /* Link with frame. */
     page->frame = frame;
     page->flags = page->flags | PTE_P;
+    vm_map_frame(page, frame);
     vm_install_page(page, page->thread);
-    list_push_back(&frame->pages, &page->frame_elem);
 
     /* Unlink with disk slot. */
     page->anon.slot = SLOT_INIT;
@@ -148,11 +147,10 @@ static bool file_backed_swap_out(struct page *page) {
   }
 
   /* Write back to file. */
-  bool succ;
-  //   sema_down(&file_sema);
-  succ = file_write_back(page, head);
-  //   sema_up(&file_sema);
-  if (!succ) return false;
+  if (!file_write_back(page, head)) {
+    printf("File write fail in file-backed swap-out\n");
+    return false;
+  }
 
   /* Clear all linked pages. */
   struct thread *t;
@@ -194,12 +192,12 @@ static void file_backed_destroy(struct page *page) {
   pml4_clear_page(t->pml4, page->va);
 
   struct frame *frame = page->frame;
-  list_remove(&page->frame_elem);
+  vm_unmap_frame(page);
 
   /* If page is the last, free frame. */
   if (list_empty(&frame->pages)) {
-    palloc_free_page(page->frame->kva);
-    free(page->frame);
+    palloc_free_page(frame->kva);
+    free(frame);
   }
 
   return;
@@ -294,8 +292,9 @@ void spt_file_writeback(struct hash_elem *e, void *aux) {
 /* Clear file sema. This function is called
  * when page fault exception occurs. */
 void clear_vm_file_sema(void) {
-  if (load_sema.value == 0) {
-    sema_up(&load_sema);
+  struct thread *curr = thread_current();
+  if (load_lock.holder == curr) {
+    lock_release(&load_lock);
   }
 }
 
@@ -327,9 +326,9 @@ static bool lazy_load_file(struct page *page, void *aux) {
 
   /* Read file to page. */
   bool succ;
-  sema_down(&load_sema);
+  lock_acquire(&load_lock);
   succ = do_file_io(page, head, file_read);
-  sema_up(&load_sema);
+  lock_release(&load_lock);
 
   return succ;
 }
@@ -447,8 +446,6 @@ static struct page *spt_get_head(struct page *page) {
   return spt_find_page(&curr->spt, file_page->map_addr);
 }
 
-
-
 /* Find free disk slot. */
 static size_t allocate_slot() {
   lock_acquire(&slot_lock);
@@ -491,13 +488,21 @@ static struct page *swap_table_pop(size_t slot) {
 /* Returns if swap table is empty. */
 static bool swap_table_empty(size_t slot) {
   ASSERT(slot < MAX_SLOTS)
-  return (swap_table[slot] == NULL);
+  bool rtn;
+  lock_acquire(&slot_lock);
+  rtn = (swap_table[slot] == NULL);
+  lock_release(&slot_lock);
+  return rtn;
 }
 
 /* Remove page from swap table. */
 static struct page *swap_table_remove(size_t slot, struct page *page) {
+  ASSERT(slot != SLOT_INIT);
+
+  lock_acquire(&slot_lock);
   struct page *before = swap_table[slot];
   if (before == page) {
+    lock_release(&slot_lock);
     return swap_table_pop(slot);
   }
 
@@ -505,10 +510,11 @@ static struct page *swap_table_remove(size_t slot, struct page *page) {
     before = before->next_swap;
     if (before == NULL) {
       /* Page is not found. */
+      lock_release(&slot_lock);
       return NULL;
     }
   }
-
   before->next_swap = page->next_swap;
+  lock_release(&slot_lock);
   return page;
 }

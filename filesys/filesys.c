@@ -157,7 +157,15 @@ off_t filesys_tell(struct file *file) {
   return pos;
 }
 
-void release_filesys_lock() {
+struct file *filesys_duplicate(struct file *file) {
+  struct file *nfile;
+  lock_acquire(&filesys_lock);
+  nfile = file_duplicate(file);
+  lock_release(&filesys_lock);
+  return nfile;
+}
+
+void clear_filesys_lock() {
   struct thread *curr = thread_current();
   if (filesys_lock.holder == curr) {
     lock_release(&filesys_lock);

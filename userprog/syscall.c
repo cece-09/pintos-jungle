@@ -4,7 +4,6 @@
 #include <string.h>
 #include <syscall-nr.h>
 
-// #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "intrinsic.h"
 #include "threads/flags.h"
@@ -39,6 +38,8 @@
 /* Helper functions. */
 static int allocate_fd(void);
 static void free_fd(int fd);
+static struct file *read_fdt(int fd);
+static void set_fdt(int fd, struct file *file);
 static bool pg_write_protect(void *va, size_t size);
 static void error_exit(int exit_code);
 
@@ -52,7 +53,8 @@ static sys_func syscall[24];
 #define error (uint64_t)(-1)
 
 /* Filesys lock. */
-static struct semaphore sys_sema;
+static struct lock fdt_lock;
+static struct file **fdt;
 
 /* Init syscall. */
 void syscall_init(void) {
@@ -84,7 +86,8 @@ void syscall_init(void) {
   syscall[SYS_MUNMAP] = munmap;
   syscall[SYS_DUP2] = dup2;
 
-  sema_init(&sys_sema, 1);
+  /* Init fdt lock. */
+  lock_init(&fdt_lock);
 }
 
 /* The main system call interface */
@@ -100,9 +103,8 @@ void syscall_handler(struct intr_frame *f) {
                           .a5 = f->R.r8,
                           .a6 = f->R.r9,
                           .intr = f};
-  
+
   f->R.rax = syscall[num](args);
-  if(!sys_sema.value) // sema_up(&sys_sema);
   return;
 }
 
@@ -128,11 +130,7 @@ uint64_t create(struct sys_args args) {
     error_exit(-1);
   }
 
-  bool rtn;
-  // sema_down(&sys_sema);
-  rtn = filesys_create(file, initial_size);
-  // sema_up(&sys_sema);
-  return (uint64_t)rtn;
+  return (uint64_t)filesys_create(file, initial_size);
 }
 
 /* Open a new file. */
@@ -142,52 +140,45 @@ uint64_t open(struct sys_args args) {
     error_exit(-1);
   }
 
-  // sema_down(&sys_sema);
-  struct thread *curr = thread_current();
-
   int fd = allocate_fd();
   if (!is_valid_fd(fd)) {
-    goto err;
+    return error;
   }
 
   struct file *file = filesys_open(file_name);
   if (file == NULL) {
     free_fd(fd);
-    goto err;
+    return error;
   }
 
-  curr->fdt[fd] = file;
-  // sema_up(&sys_sema);
+  set_fdt(fd, file);
   return (uint64_t)fd;
-err:
-  // sema_up(&sys_sema);
-  return error;
 }
 
 /* Close a file. */
 uint64_t close(struct sys_args args) {
-  struct file **fdt = thread_current()->fdt;
   int fd = (int)args.a1;
 
   if (!is_valid_fd(fd)) {
     return zero;
   }
 
+  struct file *file = read_fdt(fd);
+
   /* Standard I/O */
-  if (fdt[fd] == OPEN_STDIN) {
-    fdt[fd] = CLOSE_STDIN;
+  if (file == OPEN_STDIN) {
+    set_fdt(fd, CLOSE_STDIN);
     return zero;
   }
-  if (fdt[fd] == OPEN_STDOUT) {
-    fdt[fd] = CLOSE_STDOUT;
+  if (file == OPEN_STDOUT) {
+    set_fdt(fd, CLOSE_STDOUT);
     return zero;
   }
-  if (is_file_std(fdt[fd])) {
+  if (is_file_std(file)) {
     return zero;
   }
 
   /* Close file. */
-  struct file *file = fdt[fd];
   if (file == NULL) {
     return zero;
   }
@@ -196,14 +187,11 @@ uint64_t close(struct sys_args args) {
   if (file->dup_cnt > 0) {
     free_fd(fd);
     file->dup_cnt--;
-
     return zero;
   }
 
   free_fd(fd);
-  // sema_down(&sys_sema);
   filesys_close(file);
-  // sema_up(&sys_sema);
 }
 
 /* Read from file to buffer. */
@@ -227,31 +215,21 @@ uint64_t read(struct sys_args args) {
     return error;
   }
 
-  // sema_down(&sys_sema);
-  struct file **fdt = thread_current()->fdt;
-
+  struct file *file = read_fdt(fd);
   /* Standard I/O */
-  if (is_file_std(fdt[fd])) {
-    if (fdt[fd] == OPEN_STDIN) {
-      // sema_up(&sys_sema);
+  if (is_file_std(file)) {
+    if (file == OPEN_STDIN) {
       return input_getc();
     } else
-      goto err;
+      return error;
   }
 
   /* Normal file. */
-  struct file *file = fdt[fd];
   if (file == NULL) {
-    goto err;
+    return error;
   }
 
-  int rtn = filesys_read(file, buffer, size);
-  // TODO:
-  // sema_up(&sys_sema);
-  return (uint64_t)rtn;
-err:
-  // sema_up(&sys_sema);
-  return error;
+  return (uint64_t)filesys_read(file, buffer, size);
 }
 
 /* Write from buffer to file. */
@@ -270,31 +248,21 @@ uint64_t write(struct sys_args args) {
     return error;
   }
 
-  // sema_down(&sys_sema);
-  struct file **fdt = thread_current()->fdt;
-
+  struct file *file = read_fdt(fd);
   /* Standard I/O */
-  if (is_file_std(fdt[fd])) {
-    if (fdt[fd] == OPEN_STDOUT) {
+  if (is_file_std(file)) {
+    if (file == OPEN_STDOUT) {
       putbuf((char *)buffer, size);
-      // sema_up(&sys_sema);
       return (uint64_t)size;
     } else
-      goto err;
+      return error;
   }
 
-  struct file *file = fdt[fd];
   if (file == NULL || file->deny_write) {
-    goto err;
+    return error;
   }
 
-  int rtn = filesys_write(file, buffer, size);
-  // TODO:
-  // sema_up(&sys_sema);
-  return (uint64_t)rtn;
-err:
-  // sema_up(&sys_sema);
-  return error;
+  return (uint64_t)filesys_write(file, buffer, size);
 }
 
 /* Duplicate file of oldfd to newfd. */
@@ -313,27 +281,28 @@ uint64_t dup2(struct sys_args args) {
   }
 
   /* If oldfd has no fild, return error. */
-  struct file **fdt = thread_current()->fdt;
-  if (fdt[oldfd] == NULL) {
+  struct file *old_file = read_fdt(oldfd);
+  struct file *new_file = read_fdt(newfd);
+  if (old_file == NULL) {
     return error;
   }
 
   /* If newfd already has a file, close. */
-  if (fdt[newfd]) {
+  if (new_file) {
     args.a1 = newfd;
     // FIXME: syscall안에서 syscall이 불려도 될까?
     close(args);
   }
 
   /* If standard i/o, just copy value. */
-  if (is_file_std(fdt[oldfd])) {
-    fdt[newfd] = fdt[oldfd];
+  if (is_file_std(old_file)) {
+    set_fdt(newfd, old_file);
     return (uint64_t)newfd;
   }
 
   /* Duplicate file descriptor. */
-  fdt[newfd] = fdt[oldfd];
-  fdt[newfd]->dup_cnt++;
+  set_fdt(newfd, old_file);
+  new_file->dup_cnt++;
   return (uint64_t)newfd;
 }
 
@@ -344,16 +313,12 @@ uint64_t filesize(struct sys_args args) {
     return error;
   }
 
-  struct file **fdt = thread_current()->fdt;
-  if (fdt[fd] == NULL || is_file_std(fdt[fd])) {
+  struct file *file = read_fdt(fd);
+  if (file == NULL || is_file_std(file)) {
     return error;
   }
 
-  off_t rtn;
-  // sema_down(&sys_sema);
-  rtn = filesys_length(fdt[fd]);
-  // sema_up(&sys_sema);
-  return (uint64_t)rtn;
+  return (uint64_t)filesys_length(file);
 }
 
 /* Fork a child process. */
@@ -366,19 +331,13 @@ uint64_t fork(struct sys_args args) {
     error_exit(-1);
   }
 
-  tid_t rtn;
-  // sema_up(&sys_sema);
-  //   // // sema_down(&sys_sema);
-  rtn = process_fork(thread_name, user_if);
-  //   // // sema_up(&sys_sema);
-  return (uint64_t)rtn;
+  return (uint64_t)process_fork(thread_name, user_if);
 }
 
 /* Wait for child tid to exit. */
 uint64_t wait(struct sys_args args) {
   tid_t tid = (tid_t)args.a1;
-  ASSERT(tid >= 0);
-  // sema_up(&sys_sema);
+//   ASSERT(tid >= 0);
 
   return (uint64_t)process_wait(tid);
 }
@@ -411,11 +370,7 @@ uint64_t remove(struct sys_args args) {
     return zero;
   }
 
-  bool rtn;
-  // sema_down(&sys_sema);
-  rtn = filesys_remove(file);
-  // sema_up(&sys_sema);
-  return (uint64_t)rtn;
+  return (uint64_t)filesys_remove(file);
 }
 
 /* Seek file. */
@@ -426,14 +381,12 @@ uint64_t seek(struct sys_args args) {
     return error;
   }
 
-  struct file **fdt = thread_current()->fdt;
-  if (fdt[fd] == NULL || is_file_std(fdt[fd])) {
+  struct file *file = read_fdt(fd);
+  if (file == NULL || is_file_std(file)) {
     return error;
   }
 
-  // sema_down(&sys_sema);
-  filesys_seek(fdt[fd], position);
-  // sema_up(&sys_sema);
+  filesys_seek(file, position);
 }
 
 /* Tell file. */
@@ -443,16 +396,12 @@ uint64_t tell(struct sys_args args) {
     return error;
   }
 
-  struct file **fdt = thread_current()->fdt;
-  if (fdt[fd] == NULL || is_file_std(fdt[fd])) {
+  struct file *file = read_fdt(fd);
+  if (file == NULL || is_file_std(file)) {
     return error;
   }
 
-  unsigned rtn;
-  // sema_down(&sys_sema);
-  rtn = filesys_tell(fdt[fd]);
-  // sema_up(&sys_sema);
-  return (uint64_t)rtn;
+  return (uint64_t)filesys_tell(file);
 }
 
 /* Memory mapping. */
@@ -473,8 +422,7 @@ uint64_t mmap(struct sys_args args) {
     return zero;
   }
 
-  struct file **fdt = thread_current()->fdt;
-  struct file *file = fdt[fd];
+  struct file *file = read_fdt(fd);
 
   /* If file is standard i/o, return zero. */
   if (is_file_std(file)) {
@@ -504,27 +452,63 @@ uint64_t munmap(struct sys_args args) {
 
 /* Clear sema. See exception.c */
 void clear_syscall_file_sema() {
-  if (sys_sema.value == 0) {
-    // sema_up(&sys_sema);
+  //   if (sys_sema.value == 0) {
+  //     // sema_up(&sys_sema);
+  //   }
+  return;
+}
+
+static struct file *read_fdt(int fd) {
+  if (!is_valid_fd(fd)) {
+    return NULL;
   }
+
+  struct file *file;
+  lock_acquire(&fdt_lock);
+  fdt = thread_current()->fdt;
+  file = fdt[fd];
+  lock_release(&fdt_lock);
+  return file;
+}
+
+static void set_fdt(int fd, struct file *file) {
+  if (!is_valid_fd(fd)) {
+    return NULL;
+  }
+
+  lock_acquire(&fdt_lock);
+  fdt = thread_current()->fdt;
+  fdt[fd] = file;
+  lock_release(&fdt_lock);
 }
 
 /* Get freed file descriptor */
 static int allocate_fd() {
-  struct thread *curr = thread_current();
-  int fd;
+  lock_acquire(&fdt_lock);
+
+  fdt = thread_current()->fdt;
+  int fd = -1;
   for (fd = MIN_FD; fd < MAX_FD; fd++) {
-    if (curr->fdt[fd] != NULL) continue;
-    ASSERT(is_valid_fd(fd))
-    return fd;
+    if (fdt[fd] == NULL) {
+      ASSERT(is_valid_fd(fd))
+      break;
+    }
   }
-  return -1;
+
+  lock_release(&fdt_lock);
+  return fd;
 }
 
 /* Free file descriptor */
 static void free_fd(int fd) {
-  ASSERT(is_valid_fd(fd))
-  thread_current()->fdt[fd] = NULL;
+  if (!is_valid_fd(fd)) {
+    return;
+  }
+
+  lock_acquire(&fdt_lock);
+  fdt = thread_current()->fdt;
+  fdt[fd] = NULL;
+  lock_release(&fdt_lock);
 }
 
 /* Returns if present page is writable.
@@ -537,6 +521,7 @@ static bool pg_write_protect(void *va, size_t size) {
   for (void *p = va; p < va + size; p += PGSIZE) {
     uint64_t *pte = pml4e_walk(curr->pml4, pg_round_down(p), 0);
     if (*pte != NULL && !is_writable(pte)) {
+
       struct page *page = spt_find_page(&curr->spt, va);
       return !vm_handle_wp(page);
     }
