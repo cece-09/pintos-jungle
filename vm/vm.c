@@ -70,19 +70,37 @@ static struct frame *vm_evict_frame(void);
 void vm_map_frame(struct page *page, struct frame *frame) {
   ASSERT(frame && frame->kva)
 
-  page->frame = frame;  // TODO: ??
-  list_push_back(&frame->pages, &page->frame_elem);
-  frame->page_cnt++;
+  lock_acquire(&frame->lock);
+
+  page->frame = frame;
+  page_stack_push(&frame->stack, page);
+  frame->page_ref++;
+
+  lock_release(&frame->lock);
 }
 
 /* Remove from frame's page list. */
 void vm_unmap_frame(struct page *page) {
-  ASSERT(page->frame);
 
   struct frame *frame = page->frame;
-  list_remove(&page->frame_elem);
+  ASSERT(frame && frame->kva);
   page->frame = NULL;
-  frame->page_cnt--;
+
+  lock_acquire(&frame->lock);
+
+  page_stack_remove(&frame->stack, page);
+  ASSERT(frame->page_ref > 0);
+  frame->page_ref--;
+
+  lock_release(&frame->lock);
+}
+
+uint32_t vm_get_page_ref(struct frame *frame) {
+  uint32_t page_ref;
+  lock_acquire(&frame->lock);
+  page_ref = frame->page_ref;
+  lock_release(&frame->lock);
+  return page_ref;
 }
 
 /* Install page in current thread's pml4. */
@@ -190,17 +208,32 @@ static void iterate_clear_access(struct list_elem *e, void *aux) {
 
 /* Get count of accessed pages mapped with this frame. */
 static size_t get_access_pages(struct frame *frame) {
-  ASSERT(!list_empty(&frame->pages));
+  ASSERT(!page_stack_empty(&frame->stack));
 
   size_t access_pages = 0;
-  list_iterate(&frame->pages, iterate_get_access, &access_pages);
+  struct page *page = frame->stack;
+  struct thread *t;
+
+  while (page) {
+    t = page->thread;
+    access_pages += pml4_is_accessed(t->pml4, page->va);
+    page = page->link;
+  }
+
   return access_pages;
 }
 
 /* Clear all accessed pages' access bits mapped with this frame. */
 static void clear_access_pages(struct frame *frame) {
-  ASSERT(!list_empty(&frame->pages));
-  list_iterate(&frame->pages, iterate_clear_access, NULL);
+  ASSERT(!page_stack_empty(&frame->stack));
+
+  struct page *page = frame->stack;
+  struct thread *t;
+  while (page) {
+    t = page->thread;
+    pml4_set_accessed(t->pml4, page->va, false);
+    page = page->link;
+  }
 }
 
 /* Get the struct frame, that will be evicted. */
@@ -252,17 +285,16 @@ static struct frame *vm_get_victim(void) {
 static struct frame *vm_evict_frame(void) {
   struct frame *victim = vm_get_victim();
 
-  ASSERT(!list_empty(&victim->pages));
-
-  struct list_elem *front = list_front(&victim->pages);
-  struct page *page = list_entry(front, struct page, frame_elem);
+  ASSERT(!page_stack_empty(&victim->stack));
+  struct page *page = victim->stack;
 
   /* Remove all pages from frame and
    * push into swap table. */
   if (swap_out(page)) {
     /* After, initialize victim. */
-    ASSERT(list_empty(&victim->pages));
+    ASSERT(page_stack_empty(&victim->stack));
     memset(victim->kva, 0, PGSIZE);
+    victim->page_ref = 0;
     return victim;
   }
   return NULL;
@@ -289,12 +321,14 @@ static struct frame *vm_get_frame(void) {
     frame = vm_evict_frame();
   }
 
+  /* Init frame lock. */
+  lock_init(&frame->lock);
+
   /* Init page list, push into frame table. */
-  list_init(&frame->pages);
   list_push_back(&frame_table, &frame->elem);
 
   ASSERT(frame != NULL);
-  ASSERT(list_empty(&frame->pages));
+  ASSERT(page_stack_empty(&frame->stack));
   return frame;
 }
 
@@ -326,7 +360,7 @@ bool vm_handle_wp(struct page *page) {
 
   /* If this page was the last,
    * Re-link with frame and return. */
-  if (list_empty(&old_frame->pages)) {
+  if (!vm_get_page_ref(old_frame)) {
     page->flags = page->flags | PTE_W;
     page->flags = page->flags & ~PG_COW;
 
@@ -352,12 +386,14 @@ bool vm_handle_wp(struct page *page) {
     memcpy(new_frame->kva, old_frame->kva, PGSIZE);
     return true;
   }
+  NOT_REACHED(); // TODO: 
   return false;
 }
 
 /* Page Fault Handler: Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
                          bool write, bool not_present) {
+
   void *upage = pg_round_down(addr);
   struct thread *curr = thread_current();
   struct supplemental_page_table *spt = &curr->spt;
@@ -514,7 +550,7 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
   hash_insert(dsc_hash, &dsc_page->table_elem);
 
   /* Set new values. */
-  dsc_page->next_swap = NULL;
+  dsc_page->link = NULL;
   dsc_page->thread = thread_current();
 
   switch (page_get_type(src_page)) {
@@ -592,4 +628,44 @@ static void spt_copy_page(struct hash_elem *e, void *aux) {
     vm_install_page(src_page, src_page->thread);
     vm_install_page(dsc_page, dsc_page->thread);
   }
+}
+
+/* Push page into stack. */
+void page_stack_push(struct page **stack, struct page *page) {
+  page->link = *stack;
+  *stack = page;
+}
+
+/* Pop page from stack. */
+struct page *page_stack_pop(struct page **stack) {
+  struct page *top = *stack;
+  if (top != NULL) {
+    *stack = top->link;
+    top->link = NULL;
+  }
+  return top;
+}
+
+/* Returns if stack is empty. */
+bool page_stack_empty(struct page **stack) {
+  ASSERT(stack != NULL);
+  return (*stack == NULL);
+}
+
+/* Remove page from stack. */
+struct page *page_stack_remove(struct page **stack, struct page *page) {
+  struct page *before = *stack;
+  if (before == page) {
+    return page_stack_pop(stack);
+  }
+
+  while (before->link != page) {
+    before = before->link;
+    if (before == NULL) {
+      return NULL;
+    }
+  }
+  before->link = page->link;
+  page->link = NULL;
+  return page;
 }

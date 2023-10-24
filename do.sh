@@ -162,5 +162,5 @@ source ../../activate
 # $PAGE_MERGE_STK
 # $PAGE_MERGE_MM
 
-$SWAP_FORK
+$WAIT_SIMPLE
 # $READ_NORMAL

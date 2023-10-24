@@ -67,7 +67,7 @@ struct page {
   struct hash_elem table_elem; /* Hash elem for spt. */
   struct list_elem frame_elem; /* List elem for frame-mapping. */
 
-  struct page* next_swap;      /* Singly lisked list for swap-table. */
+  struct page* link;           /* Singly lisked list link. */
   struct thread* thread;       /* Thread info. */
   uint16_t flags;              /* Flags. */
   
@@ -86,8 +86,9 @@ struct page {
 /* The representation of "frame" */
 struct frame {
   void *kva;             /* Kernel virtual address */
-  struct list pages;     /* List of mapped pages. */
-  uint32_t page_cnt;     /* Count of mapped pages. */
+  struct lock lock;      /* Lock for page stack. */
+  struct page* stack;    /* Stack of mapped pages. */
+  uint32_t page_ref;     /* Count of mapped pages. */
   struct list_elem elem; /* List elem for frame table.*/
 };
 
@@ -153,6 +154,13 @@ void vm_clear_frame_pages(struct page *page);
 bool vm_install_page(struct page *page, struct thread* t);
 
 void vm_unmap_frame(struct page *page);
+uint32_t vm_get_page_ref(struct frame *frame);
 void vm_map_frame(struct page *page, struct frame* frame);
+
+/* Page stack functions. */
+bool page_stack_empty(struct page **stack);
+struct page *page_stack_pop(struct page **stack);
+void page_stack_push(struct page **stack, struct page *page);
+struct page *page_stack_remove(struct page **stack, struct page *page);
 
 #endif /* VM_VM_H */

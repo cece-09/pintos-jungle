@@ -124,7 +124,10 @@ tid_t process_fork(const char *name, struct intr_frame *if_) {
 
   /* If fork is not successful, return TID_ERROR. */
   struct thread_child *child = thread_get_child(&parent->children, tid);
-  if (!child)  return TID_ERROR;
+  if (!child) {
+    printf("no child\n");
+    return TID_ERROR;
+  }
 
   if (child->addr->exit_code == FORK_FAIL) {
     return TID_ERROR;
@@ -180,7 +183,6 @@ static void __do_fork(void *aux) {
   struct thread *parent = (struct thread *)aux;
   struct thread *curr = thread_current();
   bool succ = true;
-
 
   /* Mark that current thread is in forking process. */
   curr->exit_code = FORK_SUCC;
@@ -265,9 +267,9 @@ int process_exec(void *f_name) {
 #endif
 
   /* And then load the binary */
-//   lock_acquire(&load_lock);
+  //   lock_acquire(&load_lock);
   success = load(file_name, &_if);
-//   lock_release(&load_lock);
+  //   lock_release(&load_lock);
 
   /* If load failed, quit. */
   palloc_free_page(file_name);
