@@ -230,7 +230,7 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
   }
 
   /* Allocate page with lazy loading. */
-  struct file *mmap_file = file_duplicate(file);
+  struct file *mmap_file = filesys_duplicate(file);
   long left = (long)length;
   int cnt = 0;
 
@@ -331,9 +331,9 @@ static bool lazy_load_file(struct page *page, void *aux) {
   /* Read file to page. */
   bool succ;
   // TODO: lock?
-  lock_acquire(&load_lock);
+//   lock_acquire(&load_lock);
   succ = do_file_io(page, head, filesys_read);
-  lock_release(&load_lock);
+//   lock_release(&load_lock);
 
   return succ;
 }

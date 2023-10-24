@@ -407,7 +407,7 @@ static void duplicate_fdt(struct thread *parent, struct thread *child) {
       child->fdt[fd] = parent->fdt[fd];
     } else {
       /* If it's a normal file, duplicate first. */
-      child->fdt[fd] = file_duplicate(parent->fdt[fd]);
+      child->fdt[fd] = filesys_duplicate(parent->fdt[fd]);
       child->fdt[fd]->dup_cnt = parent->fdt[fd]->dup_cnt;
     }
 
@@ -456,7 +456,7 @@ static void fdt_cleanup(struct file **fdt) {
       continue;
     }
 
-    file_close(file);
+    filesys_close(file);
   }
   /* And free file descriptor table. */
   curr->fdt = NULL;
@@ -575,7 +575,7 @@ static bool load(const char *file_name, struct intr_frame *if_) {
   }
 
   /* Set this file unwritable */
-  file_deny_write(file);
+  filesys_deny_write(file);
 
   /* Read and verify executable header. */
   if (filesys_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||

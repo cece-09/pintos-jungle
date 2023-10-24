@@ -164,6 +164,32 @@ struct file *filesys_duplicate(struct file *file) {
   return nfile;
 }
 
+void filesys_deny_write(struct file *file) {
+  lock_acquire(&filesys_lock);
+  file_deny_write(file);
+  lock_release(&filesys_lock);
+}
+
+void filesys_incr_dup(struct file *file) {
+  lock_acquire(&filesys_lock);
+  file->dup_cnt++;
+  lock_release(&filesys_lock);
+}
+
+void filesys_decr_dup(struct file *file) {
+  lock_acquire(&filesys_lock);
+  file->dup_cnt--;
+  lock_release(&filesys_lock);
+}
+
+int filesys_get_dup(struct file *file) {
+  int dup_cnt;
+  lock_acquire(&filesys_lock);
+  dup_cnt = file->dup_cnt;
+  lock_release(&filesys_lock);
+  return dup_cnt;
+}
+
 void clear_filesys_lock() {
   struct thread *curr = thread_current();
   if (filesys_lock.holder == curr) {

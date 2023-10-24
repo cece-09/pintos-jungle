@@ -23,7 +23,6 @@ static struct page **swap_table;
 
 /* Semaphore for sector allocation. */
 static struct lock slot_lock;
-static struct lock disk_lock;
 
 /* Disk read & write func type. */
 typedef void (*disk_io)(struct disk *, disk_sector_t, const void *);
@@ -64,7 +63,6 @@ void vm_anon_init(void) {
 
   /* Initialize locks. */
   lock_init(&slot_lock);
-  lock_init(&disk_lock);
 }
 
 /* Initialize the file mapping */
@@ -218,12 +216,10 @@ static void free_slot(size_t slot) {
 static bool do_disk_io(disk_sector_t sector, size_t num, const void *kva,
                        disk_io func) {
 
-  lock_acquire(&disk_lock);
   int i = 0;
   for (; i < num; i++) {
     func(swap_disk, sector + i, kva + (i * DISK_SEC));
   }
-  lock_release(&disk_lock);
 }
 
 /* Push front into swap table. */

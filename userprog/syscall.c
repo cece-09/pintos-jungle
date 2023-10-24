@@ -186,9 +186,9 @@ uint64_t close(struct sys_args args) {
   }
 
   /* Remove from fd list. */
-  if (file->dup_cnt > 0) {
+  if (filesys_get_dup(file) > 0) {
     free_fd(fd);
-    file->dup_cnt--;
+    filesys_decr_dup(file);
     return zero;
   }
 
@@ -310,7 +310,7 @@ uint64_t dup2(struct sys_args args) {
 
   /* Duplicate file descriptor. */
   set_fdt(newfd, old_file);
-  new_file->dup_cnt++;
+  filesys_incr_dup(new_file);
   return (uint64_t)newfd;
 }
 
